@@ -2,28 +2,20 @@ import 'dotenv/config';
 import { z } from 'zod';
 
 const envSchema = z.object({
-  // OpenAI
-  OPENAI_API_KEY: z.string().min(1, 'OPENAI_API_KEY is required'),
-
-  // Google Gemini
+  // Google Gemini — used for transcription, embeddings, categorization, drafting
   GEMINI_API_KEY: z.string().min(1, 'GEMINI_API_KEY is required'),
 
-  // Firebase
+  // Firebase — Firestore vector DB + Auth + Cloud Run hosting
   FIREBASE_PROJECT_ID: z.string().min(1, 'FIREBASE_PROJECT_ID is required'),
-  // Path to the downloaded service account JSON key file
   FIREBASE_SERVICE_ACCOUNT_PATH: z.string().default('./firebase-service-account.json'),
 
-  // WhatsApp Groups
+  // WhatsApp Groups (leave blank on first run — fill after QR scan)
   ADMIN_GROUP_JID: z.string().default(''),
   PUBLIC_GROUP_JID: z.string().default(''),
 
-  // TTS
-  TTS_PROVIDER: z.enum(['openai', 'elevenlabs']).default('openai'),
-  OPENAI_TTS_VOICE: z
-    .enum(['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'])
-    .default('nova'),
-  ELEVENLABS_API_KEY: z.string().optional(),
-  ELEVENLABS_VOICE_ID: z.string().optional(),
+  // TTS (Google Cloud TTS via same Firebase service account — no extra key needed)
+  // Voice options: ur-PK-Wavenet-A (Urdu female), en-US-Neural2-D (English male)
+  TTS_LANGUAGE_OVERRIDE: z.enum(['ur-PK', 'en-US', 'auto']).default('auto'),
 
   // Pipeline thresholds
   DEDUP_SIMILARITY_THRESHOLD: z.coerce.number().min(0).max(1).default(0.92),
@@ -38,6 +30,9 @@ const envSchema = z.object({
   // Auth & Temp
   AUTH_DIR: z.string().default('./auth_info_baileys'),
   TMP_DIR: z.string().default('./tmp'),
+
+  // Cloud Run health-check port
+  PORT: z.coerce.number().default(8080),
 });
 
 const parseResult = envSchema.safeParse(process.env);

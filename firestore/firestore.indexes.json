@@ -8,7 +8,7 @@ indexes:
     fields:
       - fieldPath: embedding
         vectorConfig:
-          dimension: 1536
+          dimension: 768
           flat: {}
 
   # ── Category + Frequency compound index (for filtered queries) ──────────────

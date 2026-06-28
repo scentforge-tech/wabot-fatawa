@@ -1,36 +1,35 @@
-import OpenAI from 'openai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { env } from '../config/env';
 import logger from '../config/logger';
 
-const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
 
-const EMBEDDING_MODEL = 'text-embedding-3-small';
-const EMBEDDING_DIMENSIONS = 1536;
-
-export { EMBEDDING_DIMENSIONS };
+// Google's text-embedding-004 produces 768-dimensional vectors
+const EMBEDDING_MODEL = 'text-embedding-004';
+export const EMBEDDING_DIMENSIONS = 768;
 
 /**
  * Generate a single embedding vector for a text string.
+ * Uses Gemini text-embedding-004 (768 dims, multilingual).
  */
 export async function embedText(text: string): Promise<number[]> {
-  const response = await openai.embeddings.create({
-    model: EMBEDDING_MODEL,
-    input: text.trim(),
-  });
-  return response.data[0].embedding;
+  const model = genAI.getGenerativeModel({ model: EMBEDDING_MODEL });
+  const result = await model.embedContent(text.trim());
+  return result.embedding.values;
 }
 
 /**
- * Batch-embed an array of strings with concurrency control and
- * exponential-backoff retry on rate-limit errors (429).
+ * Batch-embed an array of strings.
+ * Processes in chunks with exponential-backoff retry on rate-limit errors.
  *
- * @param texts      - Array of strings to embed
- * @param batchSize  - How many to send per API call (max 2048 per OpenAI docs)
+ * @param texts     - Array of strings to embed
+ * @param batchSize - Chunk size per API call (Gemini supports up to 100 per batch call)
  */
 export async function embedBatch(
   texts: string[],
-  batchSize: number = 100,
+  batchSize: number = 50,
 ): Promise<number[][]> {
+  const model = genAI.getGenerativeModel({ model: EMBEDDING_MODEL });
   const results: number[][] = [];
 
   for (let i = 0; i < texts.length; i += batchSize) {
@@ -43,19 +42,16 @@ export async function embedBatch(
     let attempt = 0;
     while (true) {
       try {
-        const response = await openai.embeddings.create({
-          model: EMBEDDING_MODEL,
-          input: chunk.map((t) => t.trim()),
-        });
-        const embeddings = response.data
-          .sort((a, b) => a.index - b.index)
-          .map((d) => d.embedding);
+        // Use batchEmbedContents for efficiency
+        const requests = chunk.map((t) => ({ content: { parts: [{ text: t.trim() }], role: 'user' } }));
+        const batchResult = await model.batchEmbedContents({ requests });
+        const embeddings = batchResult.embeddings.map((e) => e.values);
         results.push(...embeddings);
         break;
       } catch (err: unknown) {
         attempt++;
         const isRateLimit =
-          err instanceof Error && err.message.includes('429');
+          err instanceof Error && (err.message.includes('429') || err.message.includes('RESOURCE_EXHAUSTED'));
         if (!isRateLimit || attempt > 5) throw err;
         const delay = Math.min(1000 * 2 ** attempt, 32000);
         logger.warn({ attempt, delay }, 'Rate limited on embeddings — retrying');
