@@ -15,16 +15,49 @@ import logger from '../../config/logger';
 // ─── Keyword Detection ────────────────────────────────────────────────────────
 
 const APPROVAL_KEYWORDS = [
+  // Romanized / English
   'approve', 'approved', 'yes', 'correct', 'right', 'send it', 'send', 'go ahead',
   'haan', 'han', 'sahi hai', 'sahi he', 'sahih hai',
   'theek hai', 'theek he', 'thik hai', 'thik he', 'tik hai',
   'bilkul', 'bilkul sahi', 'bilkul theek',
-  'ja sakta hai', 'bhej do', 'bhejen', 'munasib hai', 'ok', 'okay',
+  'ja sakta hai', 'bhej do', 'bhejen', 'munasib hai', 'ok', 'okay', 'achha', 'acha',
+  // Urdu script (Arabic)
+  '\u0679\u06BE\u06CC\u06A9 \u06C1\u06D2',   // ٹھیک ہے
+  '\u0679\u06BE\u06CC\u06A9',               // ٹھیک
+  '\u06C1\u0627\u06BA',                    // ہاں
+  '\u062C\u06CC \u06C1\u0627\u06BA',       // جی ہاں
+  '\u0628\u06BE\u06CC\u062C \u062F\u0648',  // بھیج دو
+  '\u0628\u06BE\u06CC\u062C\u0648',        // بھیجو
+  '\u0635\u062D\u06CC\u062D \u06C1\u06D2',  // صحیح ہے
+  '\u0628\u0627\u0644\u06A9\u0644',        // بالکل
+  '\u0627\u0686\u06BE\u0627',              // اچھا
+  '\u062C\u06CC',                          // جی
+  // Hindi script (Devanagari)
+  '\u0920\u0940\u0915 \u0939\u0948',       // ठीक है
+  '\u0920\u0940\u0915',                    // ठीक
+  '\u0939\u093E\u0901',                    // हाँ
+  '\u092D\u0947\u091C\u094B',              // भेजो
+  '\u092D\u0947\u091C \u0926\u094B',       // भेज दो
+  '\u0938\u0939\u0940 \u0939\u0948',       // सही है
+  '\u092C\u093F\u0932\u0915\u0941\u0932',  // बिलकुल
+  '\u0905\u091A\u094D\u091B\u093E',        // अच्छा
+  '\u091C\u0940',                          // जी
 ];
 
 const REJECTION_KEYWORDS = [
+  // Romanized / English
   'nahi', 'na', 'no', 'reject', 'galat', 'ghalat',
   'theek nahi', 'wapas lo', 'mat bhejo', 'rok lo',
+  // Urdu script
+  '\u0646\u06C1\u06CC\u06BA',              // نہیں
+  '\u063A\u0644\u0637',                    // غلط
+  '\u0679\u06BE\u06CC\u06A9 \u0646\u06C1\u06CC\u06BA',  // ٹھیک نہیں
+  '\u0645\u062A \u0628\u06BE\u06CC\u062C\u0648', // مت بھیجو
+  // Hindi script
+  '\u0928\u0939\u0940\u0902',              // नहीं
+  '\u0917\u0932\u0924',                    // गलत
+  '\u092E\u0924 \u092D\u0947\u091C\u094B', // मत भेजो
+  '\u0920\u0940\u0915 \u0928\u0939\u0940', // ठीक नही
 ];
 
 function detectIntent(text: string): 'approved' | 'rejected' | 'unclear' {
@@ -99,15 +132,22 @@ export async function handleApprovalMessage(
     logger.info({ intent, transcription }, 'Intent from Shaikh voice');
 
     if (intent === 'approved') {
-      // Shaikh said "thik hai" / "approve" → send draft to public
+      // Shaikh said 'thik hai' / 'approve' → send draft to public
       await dispatchDraft(sock, msg, transcription);
     } else if (intent === 'rejected') {
-      // Shaikh said "nahi" / "reject" → discard draft
+      // Shaikh said 'nahi' / 'reject' → discard draft
       await rejectDraft(sock, msg, transcription);
     } else {
-      // Substantive answer — forward Shaikh's voice directly to public
-      logger.info({ msgId }, 'Substantive answer — forwarding voice to public group');
-      await forwardVoiceToPublic(sock, audioBuffer, msgId);
+      // Unclear — do NOT auto-forward. Prompt Shaikh to clarify.
+      logger.info({ msgId, transcription }, 'Unclear intent — prompting Shaikh for clarification');
+      await sock.sendMessage(env.ADMIN_GROUP_JID, {
+        text:
+          `🤔 *Unclear response detected*\n\n` +
+          `_Transcribed: "${transcription}"_\n\n` +
+          `✅ Type or say *thik hai* to send the AI draft to the public group.\n` +
+          `🎤 Record your own answer — it will be forwarded directly.\n` +
+          `❌ Say *nahi* to discard the draft.`,
+      });
     }
     return;
   }
