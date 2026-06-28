@@ -4,8 +4,8 @@ import logger from '../config/logger';
 
 const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
 
-// Use Flash for fast transcription (cheaper, lower latency than Pro)
-const TRANSCRIPTION_MODEL = 'gemini-1.5-flash';
+// gemini-2.5-flash: confirmed available with quota on this API key
+const TRANSCRIPTION_MODEL = 'gemini-2.5-flash';
 
 export type TranscriptionLanguageHint = 'ur' | 'en' | 'hi' | 'auto';
 

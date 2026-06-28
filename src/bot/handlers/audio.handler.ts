@@ -106,26 +106,39 @@ export async function handleAudioMessage(
     return;
   }
 
-  // ── 3. Generate embedding ─────────────────────────────────────────────────
-  const embedding = await embedText(transcription);
+  // ── 3–7. Embed → Match → Score → Draft (with graceful fallback) ─────────────
+  let draft: Awaited<ReturnType<typeof generateDraft>>;
+  let scoring: ReturnType<typeof computeCompositeScore>;
 
-  // ── 4. Query Supabase for similar historical answers ──────────────────────
-  const matches = await matchFataawa(embedding);
-  logger.info({ matchCount: matches.length, msgId }, 'Database matches retrieved');
+  try {
+    // ── 3. Generate embedding ────────────────────────────────────────────────
+    const embedding = await embedText(transcription);
 
-  // ── 5. Compute composite score ────────────────────────────────────────────
-  const scoring = computeCompositeScore(matches);
-  logger.info(
-    {
-      compositeScore: scoring.compositeScore.toFixed(3),
-      tier: scoring.tier,
-      topCategory: scoring.topMatch?.category,
-    },
-    'Composite score computed',
-  );
+    // ── 4. Query Firestore for similar historical answers ────────────────────
+    const matches = await matchFataawa(embedding);
+    logger.info({ matchCount: matches.length, msgId }, 'Database matches retrieved');
 
-  // ── 6. Generate draft (gated by score tier) ───────────────────────────────
-  const draft = await generateDraft(transcription, scoring);
+    // ── 5. Compute composite score ───────────────────────────────────────────
+    scoring = computeCompositeScore(matches);
+    logger.info(
+      { compositeScore: scoring.compositeScore.toFixed(3), tier: scoring.tier },
+      'Composite score computed',
+    );
+
+    // ── 6. Generate draft ────────────────────────────────────────────────────
+    draft = await generateDraft(transcription, scoring);
+
+  } catch (err) {
+    // Firestore not set up yet, or embedding failed — send transcript to admin for manual review
+    logger.warn({ err, msgId }, 'Pipeline error (embedding/DB) — falling back to manual review');
+    await sock.sendMessage(env.ADMIN_GROUP_JID, {
+      text:
+        `🎤 *NEW PILGRIM QUESTION*\n\n` +
+        `"${transcription}"\n\n` +
+        `_Record your voice answer in this group — it will be automatically forwarded to the pilgrim._`,
+    });
+    return;
+  }
 
   // ── 7. Route based on draft type ──────────────────────────────────────────
   if (draft.type === 'FLAG_FOR_MANUAL_REVIEW') {
@@ -140,6 +153,7 @@ export async function handleAudioMessage(
     });
     return;
   }
+
 
   // ── 8. Convert draft text → TTS audio ────────────────────────────────────
   let ttsBuffer: Buffer;

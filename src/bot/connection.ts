@@ -20,7 +20,13 @@ let sock: WASocket | null = null;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_DELAY_MS = 60_000;
 
-// ─── JID Discovery Mode ──────────────────────────────────────────────────────
+// Callbacks so index.ts can serve QR and connection state over HTTP
+let _qrCallback: ((qr: string) => void) | null = null;
+let _connectionCallback: ((connected: boolean) => void) | null = null;
+
+export function setQrCallback(cb: (qr: string) => void): void { _qrCallback = cb; }
+export function setConnectionCallback(cb: (connected: boolean) => void): void { _connectionCallback = cb; }
+
 // When ADMIN_GROUP_JID or PUBLIC_GROUP_JID are not set, the bot logs every
 // incoming group JID so you can identify your groups. Post any message in each
 // group and watch the logs — the JID will be printed clearly.
@@ -89,23 +95,18 @@ export async function startBot(): Promise<void> {
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
-    // Display QR code visually in the terminal
+    // Fire QR callback → served as scannable image at http://localhost:8080
     if (qr) {
-      console.log('\n\n');
-      console.log('━'.repeat(60));
-      console.log('  📱  SCAN THIS QR CODE WITH WHATSAPP');
-      console.log('  WhatsApp → ⋮ Menu → Linked Devices → Link a Device');
-      console.log('━'.repeat(60));
+      if (_qrCallback) _qrCallback(qr);
+      // Also print ascii fallback in terminal
+      console.log('\n📱  Open http://localhost:8080 in your browser to scan the QR code\n');
       qrcode.generate(qr, { small: true });
-      console.log('━'.repeat(60));
-      console.log('  QR expires in ~60s — a new one will appear automatically');
-      console.log('━'.repeat(60));
-      console.log('\n');
     }
 
     if (connection === 'open') {
       reconnectAttempts = 0;
-      logger.info('✅  WhatsApp connected successfully!');
+      if (_connectionCallback) _connectionCallback(true);
+      logger.info('✅  WhatsApp connected! Browser page at http://localhost:8080 will update.');
 
       if (DISCOVERY_MODE) {
         logger.info(
@@ -136,45 +137,64 @@ export async function startBot(): Promise<void> {
 
   // ── Message handling ─────────────────────────────────────────────────────
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return;
+    logger.debug({ type, count: messages.length }, 'messages.upsert fired');
+
+    if (type !== 'notify') return; // 'append' = history sync, skip
 
     for (const msg of messages) {
-      if (!msg.message || msg.key.fromMe) continue;
-
       const remoteJid = msg.key.remoteJid ?? '';
+      const msgType   = msg.message ? Object.keys(msg.message)[0] : 'none';
+      const fromMe    = msg.key.fromMe ?? false;
+
+      // Log EVERY incoming event so we can debug routing
+      logger.info({ remoteJid, msgType, fromMe, msgId: msg.key.id }, '📨 Incoming message');
+
+      if (!msg.message) { logger.debug({ msgId: msg.key.id }, 'Skip: no message body'); continue; }
+      if (fromMe)       { logger.debug({ msgId: msg.key.id }, 'Skip: bot sent this'); continue; }
+
       const isGroup = remoteJid.endsWith('@g.us');
 
-      // ── JID Discovery: log every group message with the JID ─────────────
+      // ── JID Discovery ─────────────────────────────────────────────────────
       if (DISCOVERY_MODE && isGroup) {
-        // Get group name if available
         const pushName = msg.pushName ?? 'unknown';
         console.log('\n' + '═'.repeat(60));
         console.log('  🔍  GROUP MESSAGE DETECTED');
         console.log(`  JID      : ${remoteJid}`);
         console.log(`  From     : ${pushName}`);
-        console.log(`  Msg Type : ${Object.keys(msg.message)[0]}`);
+        console.log(`  Msg Type : ${msgType}`);
         console.log('  ─── Add this to your .env ───');
         console.log(`  ADMIN_GROUP_JID=${remoteJid}   ← if this is the admin group`);
         console.log(`  PUBLIC_GROUP_JID=${remoteJid}  ← if this is the public group`);
         console.log('═'.repeat(60) + '\n');
         logger.info({ jid: remoteJid, from: pushName }, '🔍 JID discovered — copy to .env');
-        continue; // Don't process messages in discovery mode
+        continue;
       }
 
-      // ── Normal operation ─────────────────────────────────────────────────
+      // ── Normal operation ──────────────────────────────────────────────────
       const isPublicGroup = remoteJid === env.PUBLIC_GROUP_JID;
       const isAdminGroup  = remoteJid === env.ADMIN_GROUP_JID;
-      const msgType = Object.keys(msg.message)[0];
-      const isAudio = msgType === 'audioMessage' || msgType === 'pttMessage';
+
+      // Catch all audio variants WhatsApp uses
+      const isAudio =
+        msgType === 'audioMessage' ||
+        msgType === 'pttMessage'   ||
+        (msgType === 'documentMessage' &&
+          (msg.message?.documentMessage?.mimetype ?? '').startsWith('audio/'));
+
+      logger.info({ isPublicGroup, isAdminGroup, isAudio, msgType, remoteJid }, '🔎 Routing decision');
 
       if (isPublicGroup && isAudio) {
+        logger.info({ msgId: msg.key.id }, '🎤 → Audio handler');
         await handleAudioMessage(sock!, msg).catch((err) =>
           logger.error({ err, msgId: msg.key.id }, 'Audio handler error'),
         );
       } else if (isAdminGroup && isAudio) {
+        logger.info({ msgId: msg.key.id }, '✅ → Approval handler');
         await handleApprovalMessage(sock!, msg).catch((err) =>
           logger.error({ err, msgId: msg.key.id }, 'Approval handler error'),
         );
+      } else {
+        logger.debug({ isPublicGroup, isAdminGroup, isAudio, msgType, remoteJid }, 'No handler matched');
       }
     }
   });

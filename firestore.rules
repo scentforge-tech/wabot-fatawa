@@ -1,0 +1,9 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // fataawa collection — read/write only via service account (server-side)
+    match /fataawa/{document} {
+      allow read, write: if false; // All access via Admin SDK only
+    }
+  }
+}

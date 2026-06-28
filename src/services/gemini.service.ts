@@ -7,7 +7,7 @@ import type { FatwaMatch } from './firestore.service';
 
 const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
 
-function getModel(modelName: string = 'gemini-1.5-pro') {
+function getModel(modelName: string = 'gemini-2.5-flash') {
   return genAI.getGenerativeModel({
     model: modelName,
     safetySettings: [

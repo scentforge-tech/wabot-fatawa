@@ -1,60 +1,63 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { env } from '../config/env';
 import logger from '../config/logger';
 
-const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
+// ─── Gemini Embeddings via REST ───────────────────────────────────────────────
+// Uses gemini-embedding-001 (768-dim, multilingual) — confirmed available on
+// this API key via: GET /v1beta/models?key=...
 
-// Google's text-embedding-004 produces 768-dimensional vectors
-const EMBEDDING_MODEL = 'text-embedding-004';
+const EMBEDDING_MODEL = 'gemini-embedding-001';
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 export const EMBEDDING_DIMENSIONS = 768;
 
 /**
- * Generate a single embedding vector for a text string.
- * Uses Gemini text-embedding-004 (768 dims, multilingual).
+ * Generate a single 768-dim embedding vector via gemini-embedding-001.
  */
 export async function embedText(text: string): Promise<number[]> {
-  const model = genAI.getGenerativeModel({ model: EMBEDDING_MODEL });
-  const result = await model.embedContent(text.trim());
-  return result.embedding.values;
+  const url = `${GEMINI_BASE}/models/${EMBEDDING_MODEL}:embedContent?key=${env.GEMINI_API_KEY}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: `models/${EMBEDDING_MODEL}`,
+      content: { parts: [{ text: text.trim() }] },
+      outputDimensionality: 768,   // Firestore max is 2048; keep 768 for efficiency
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Gemini embed error ${res.status}: ${err}`);
+  }
+  const json = await res.json() as { embedding: { values: number[] } };
+  return json.embedding.values;
 }
 
 /**
- * Batch-embed an array of strings.
- * Processes in chunks with exponential-backoff retry on rate-limit errors.
- *
- * @param texts     - Array of strings to embed
- * @param batchSize - Chunk size per API call (Gemini supports up to 100 per batch call)
+ * Batch-embed an array of strings (sequential with rate-limit retry).
  */
 export async function embedBatch(
   texts: string[],
-  batchSize: number = 50,
+  batchSize: number = 20,
 ): Promise<number[][]> {
-  const model = genAI.getGenerativeModel({ model: EMBEDDING_MODEL });
   const results: number[][] = [];
 
   for (let i = 0; i < texts.length; i += batchSize) {
     const chunk = texts.slice(i, i + batchSize);
-    logger.debug(
-      { batchStart: i, batchEnd: i + chunk.length, total: texts.length },
-      'Embedding batch',
-    );
+    logger.debug({ batchStart: i, total: texts.length }, 'Embedding batch');
 
     let attempt = 0;
     while (true) {
       try {
-        // Use batchEmbedContents for efficiency
-        const requests = chunk.map((t) => ({ content: { parts: [{ text: t.trim() }], role: 'user' } }));
-        const batchResult = await model.batchEmbedContents({ requests });
-        const embeddings = batchResult.embeddings.map((e) => e.values);
+        const embeddings = await Promise.all(chunk.map((t) => embedText(t)));
         results.push(...embeddings);
         break;
       } catch (err: unknown) {
         attempt++;
         const isRateLimit =
-          err instanceof Error && (err.message.includes('429') || err.message.includes('RESOURCE_EXHAUSTED'));
+          err instanceof Error &&
+          (err.message.includes('429') || err.message.includes('RESOURCE_EXHAUSTED'));
         if (!isRateLimit || attempt > 5) throw err;
         const delay = Math.min(1000 * 2 ** attempt, 32000);
-        logger.warn({ attempt, delay }, 'Rate limited on embeddings — retrying');
+        logger.warn({ attempt, delay }, 'Rate limited — retrying');
         await new Promise((r) => setTimeout(r, delay));
       }
     }
@@ -63,14 +66,10 @@ export async function embedBatch(
   return results;
 }
 
-/**
- * Compute the cosine similarity between two equal-length vectors.
- * Returns a value between -1.0 and 1.0.
- */
+// ─── Cosine Similarity ────────────────────────────────────────────────────────
+
 export function cosineSimilarity(a: number[], b: number[]): number {
-  let dot = 0;
-  let normA = 0;
-  let normB = 0;
+  let dot = 0, normA = 0, normB = 0;
   for (let i = 0; i < a.length; i++) {
     dot += a[i] * b[i];
     normA += a[i] * a[i];
