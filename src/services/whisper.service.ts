@@ -4,8 +4,8 @@ import logger from '../config/logger';
 
 const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
 
-// gemini-2.5-flash: confirmed available with quota on this API key
-const TRANSCRIPTION_MODEL = 'gemini-2.5-flash';
+// gemini-1.5-flash: 1500 RPD on free tier (vs 20 RPD for gemini-2.5-flash)
+const TRANSCRIPTION_MODEL = 'gemini-1.5-flash';
 
 export type TranscriptionLanguageHint = 'ur' | 'en' | 'hi' | 'auto';
 

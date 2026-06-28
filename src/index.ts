@@ -1,17 +1,13 @@
-import 'dotenv/config';
+// ─── HTTP server MUST start first ─────────────────────────────────────────────
+// Cloud Run requires the container to bind PORT within ~4 minutes.
+// We start the server here — BEFORE any other import that might call process.exit().
 import * as http from 'http';
-import * as qrcode from 'qrcode-terminal';
-import { startBot, setQrCallback, setConnectionCallback } from './bot/connection';
-import { env } from './config/env';
-import logger from './config/logger';
 
-// ─── QR State ─────────────────────────────────────────────────────────────────
-
+const PORT = Number(process.env.PORT) || 8080;
 let latestQr: string | null = null;
 let botConnected = false;
 
-// ─── HTML Pages ───────────────────────────────────────────────────────────────
-
+// HTML pages defined before server so they're in scope
 const HTML_CONNECTED = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>WhatsApp Bot</title>
 <style>*{margin:0;padding:0;box-sizing:border-box;}
@@ -84,8 +80,7 @@ QRCode.toCanvas(document.getElementById('qr'),'${escaped}',
 </script></body></html>`;
 }
 
-// ─── HTTP Server ──────────────────────────────────────────────────────────────
-
+// ─── HTTP Server — starts immediately ─────────────────────────────────────────
 const server = http.createServer((_req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
   if (botConnected) {
@@ -97,37 +92,43 @@ const server = http.createServer((_req, res) => {
   }
 });
 
-server.listen(env.PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`[STARTUP] HTTP server ready on port ${PORT}`);
+});
+
+// ─── Bot init (after server is bound) ─────────────────────────────────────────
+import 'dotenv/config';
+import * as qrcode from 'qrcode-terminal';
+import { startBot, setQrCallback, setConnectionCallback } from './bot/connection';
+import logger from './config/logger';
+
+setQrCallback((qr: string) => {
+  latestQr = qr;
+  botConnected = false;
+  logger.info(`📱 New QR ready → open http://localhost:${PORT} in browser to scan`);
+  qrcode.generate(qr, { small: true });
+});
+
+setConnectionCallback((connected: boolean) => {
+  botConnected = connected;
+  if (connected) latestQr = null;
+  logger.info({ connected }, connected ? '✅ WhatsApp connected' : '⚠️ WhatsApp disconnected');
+});
+
+async function main(): Promise<void> {
   logger.info(`
 ╔════════════════════════════════════════════════════╗
 ║   🤖  WhatsApp Fatawa Bot — Starting               ║
 ╠════════════════════════════════════════════════════╣
 ║                                                    ║
 ║   📱  OPEN THIS IN YOUR BROWSER TO SCAN QR:        ║
-║       http://localhost:${env.PORT}                         ║
+║       http://localhost:${PORT}                         ║
 ║                                                    ║
 ╚════════════════════════════════════════════════════╝`);
-});
-
-// ─── Bot Startup ─────────────────────────────────────────────────────────────
-
-setQrCallback((qr: string) => {
-  latestQr = qr;
-  botConnected = false;
-  logger.info('📱 New QR ready → open http://localhost:8080 in browser to scan');
-  qrcode.generate(qr, { small: true }); // ASCII fallback in terminal
-});
-
-setConnectionCallback((connected: boolean) => {
-  botConnected = connected;
-  if (connected) latestQr = null;
-});
-
-async function main(): Promise<void> {
   await startBot();
 }
 
 main().catch((err: unknown) => {
-  logger.error({ err }, 'Fatal startup error');
-  process.exit(1);
+  logger.error({ err }, 'Fatal bot startup error — HTTP server still running');
+  // Do NOT call process.exit() — keep HTTP server alive for Cloud Run health check
 });
