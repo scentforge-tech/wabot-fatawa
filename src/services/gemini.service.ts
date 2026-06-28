@@ -23,6 +23,39 @@ function getModel(modelName: string = 'gemini-1.5-flash') {
   });
 }
 
+// ─── Translation ──────────────────────────────────────────────────────────────
+
+/**
+ * Translates Urdu/Hindi/mixed text to English for vector search.
+ * The English translation is used ONLY for embedding/search —
+ * the original Urdu is kept for display and Shaikh review.
+ */
+export async function translateToEnglish(text: string): Promise<string> {
+  // If text is already mostly Latin (English/romanized), return as-is
+  const nonLatinRatio =
+    (text.match(/[\u0600-\u06FF\u0900-\u097F]/g) ?? []).length / Math.max(text.length, 1);
+  if (nonLatinRatio < 0.2) {
+    logger.debug('Text is mostly Latin — skipping translation');
+    return text;
+  }
+
+  const model = getModel();
+  const prompt =
+    `Translate the following question to English. ` +
+    `Return ONLY the English translation — no explanations, no labels.\n\nQuestion: "${text}"`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const translated = result.response.text().trim();
+    logger.debug({ original: text, translated }, 'Translated to English for search');
+    return translated;
+  } catch (err) {
+    logger.warn({ err }, 'Translation failed — using original text for search');
+    return text; // fallback: use original text
+  }
+}
+
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface RawRecord {

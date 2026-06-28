@@ -9,6 +9,7 @@ import { matchFataawa } from '../../services/firestore.service';
 import { computeCompositeScore } from '../scoring';
 import { generateDraft } from '../draft';
 import { textToSpeech } from '../../services/tts.service';
+import { translateToEnglish } from '../../services/gemini.service';
 import { env } from '../../config/env';
 import logger from '../../config/logger';
 
@@ -98,7 +99,8 @@ export async function handleAudioMessage(
   // ── 2. Transcribe via Whisper ─────────────────────────────────────────────
   let transcription: string;
   try {
-    const result = await transcribeAudio(audioBuffer, 'audio.ogg', 'ur');
+    // 'auto' — let Gemini detect language naturally; translate to English later for search
+    const result = await transcribeAudio(audioBuffer, 'audio.ogg', 'auto');
     transcription = result.text;
     logger.info({ transcription, msgId }, 'Audio transcribed');
   } catch (err) {
@@ -119,10 +121,16 @@ export async function handleAudioMessage(
   let scoring: ReturnType<typeof computeCompositeScore>;
 
   try {
-    // ── 3. Generate embedding ────────────────────────────────────────────────
-    const embedding = await embedText(transcription);
+    // ── 3. Translate to English for vector search ─────────────────────────────
+    // Pilgrim asks in Urdu/Hindi → translate for matching English fatawa in DB
+    // Original Urdu transcription is kept for display to Shaikh and draft generation
+    const searchText = await translateToEnglish(transcription);
+    logger.info({ searchText, msgId }, 'Search text ready');
 
-    // ── 4. Query Firestore for similar historical answers ────────────────────
+    // ── 4. Generate embedding ────────────────────────────────────────────────
+    const embedding = await embedText(searchText);
+
+    // ── 5. Query Firestore for similar historical answers ────────────────────
     const matches = await matchFataawa(embedding);
     logger.info({ matchCount: matches.length, msgId }, 'Database matches retrieved');
 
