@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment secrets — NEVER commit
+.env
+
+# Baileys session — contains WhatsApp auth tokens
+auth_info_baileys/
+
+# Temporary audio processing files
+tmp/
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Logs
+*.log
+logs/
+
+# OS artifacts
+.DS_Store
+Thumbs.db

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+auth_info_baileys/
+tmp/
+*.log
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
+npm-debug.log*

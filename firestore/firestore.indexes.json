@@ -1,0 +1,30 @@
+indexes:
+  # ── Vector Search Index (required for findNearest() cosine search) ──────────
+  # This index MUST be created before the bot can perform similarity searches.
+  # Firestore will return an error with a creation link on the first query
+  # if this index doesn't exist — click the link or deploy this file.
+  - collectionGroup: fataawa
+    queryScope: COLLECTION
+    fields:
+      - fieldPath: embedding
+        vectorConfig:
+          dimension: 1536
+          flat: {}
+
+  # ── Category + Frequency compound index (for filtered queries) ──────────────
+  - collectionGroup: fataawa
+    queryScope: COLLECTION
+    fields:
+      - fieldPath: category
+        order: ASCENDING
+      - fieldPath: historical_frequency_count
+        order: DESCENDING
+
+  # ── Updated-at single field index ──────────────────────────────────────────
+  - collectionGroup: fataawa
+    queryScope: COLLECTION
+    fields:
+      - fieldPath: updated_at
+        order: DESCENDING
+
+fieldOverrides: []

@@ -1,0 +1,14 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // fataawa collection — server-side only (Admin SDK bypasses these rules)
+    // If you ever add a client-side dashboard, tighten these rules.
+    match /fataawa/{docId} {
+      // Allow reads and writes only from authenticated admin users
+      // (The bot uses service account which bypasses RLS entirely)
+      allow read: if request.auth != null;
+      allow write: if false; // Bot writes via Admin SDK only
+    }
+  }
+}

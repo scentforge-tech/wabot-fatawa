@@ -1,0 +1,43 @@
+services:
+  wabot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    image: wabot-fatawa:latest
+    container_name: wabot-fatawa
+    restart: unless-stopped
+
+    # ── Environment ────────────────────────────────────────────
+    env_file:
+      - .env
+
+    # ── Persistent Storage ─────────────────────────────────────
+    # auth_info_baileys: WhatsApp session tokens MUST survive restarts
+    # tmp: Temporary audio workspace (cleaned between runs)
+    volumes:
+      - wabot_auth:/app/auth_info_baileys
+      - wabot_tmp:/app/tmp
+
+    # ── Logging ────────────────────────────────────────────────
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+    # ── Resource Limits ────────────────────────────────────────
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+
+# Named volumes for data persistence
+volumes:
+  wabot_auth:
+    name: wabot_auth_info
+  wabot_tmp:
+    name: wabot_tmp_workspace
