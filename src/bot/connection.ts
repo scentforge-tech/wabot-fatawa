@@ -188,8 +188,9 @@ export async function startBot(): Promise<void> {
         await handleAudioMessage(sock!, msg).catch((err) =>
           logger.error({ err, msgId: msg.key.id }, 'Audio handler error'),
         );
-      } else if (isAdminGroup && isAudio) {
-        logger.info({ msgId: msg.key.id }, '✅ → Approval handler');
+      } else if (isAdminGroup && (isAudio || msgType === 'conversation' || msgType === 'extendedTextMessage')) {
+        // Handle BOTH voice notes (forward to public) AND text approvals (thik hai / nahi)
+        logger.info({ msgId: msg.key.id, msgType }, '✅ → Approval handler');
         await handleApprovalMessage(sock!, msg).catch((err) =>
           logger.error({ err, msgId: msg.key.id }, 'Approval handler error'),
         );

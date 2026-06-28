@@ -51,6 +51,14 @@ export function deletePendingDraft(adminMsgId: string): void {
   pendingDrafts.delete(adminMsgId);
 }
 
+export function getMostRecentPendingDraft(): typeof pendingDrafts extends Map<string, infer V> ? V | undefined : never {
+  if (pendingDrafts.size === 0) return undefined;
+  // Return the most recently added draft (last entry in insertion-order Map)
+  let last: ReturnType<typeof getMostRecentPendingDraft>;
+  for (const val of pendingDrafts.values()) last = val as any;
+  return last;
+}
+
 // ─── Audio Handler ────────────────────────────────────────────────────────────
 
 /**
@@ -155,35 +163,52 @@ export async function handleAudioMessage(
   }
 
 
-  // ── 8. Convert draft text → TTS audio ────────────────────────────────────
+  // ── 8. Cache the pending draft FIRST (before TTS) ────────────────────────
+  // Store draft now so text-approval still works if TTS fails
+  const draftCacheKey = `draft_${msgId}`;
+  pendingDrafts.set(draftCacheKey, {
+    draftText: draft.text,
+    draftType: draft.type,
+    compositeScore: draft.compositeScore,
+    originalQuestion: transcription,
+    userJid: senderJid,
+    publicGroupJid,
+    publicMsgId: msg.key.id ?? undefined,
+    timestamp: Date.now(),
+  });
+  logger.info({ draftCacheKey }, 'Draft cached');
+
+  // ── 9. Convert draft text → TTS audio ────────────────────────────────────
   let ttsBuffer: Buffer;
   try {
     ttsBuffer = await textToSpeech(draft.text);
     logger.debug({ bytes: ttsBuffer.length }, 'TTS audio generated');
   } catch (err) {
     logger.error({ err, msgId }, 'TTS conversion failed — sending text fallback to admin');
+    // Send draft as text — Shaikh can approve by replying 'thik hai' / 'approve'
     await sock.sendMessage(env.ADMIN_GROUP_JID, {
-      text: `⚠️ *TTS Failed* — Please approve the text draft below:\n\n${draft.text}`,
+      text:
+        `📝 *DRAFT ANSWER — AWAITING APPROVAL*\n\n` +
+        `*Pilgrim asked:* "${transcription}"\n\n` +
+        `*Suggested answer:*\n${draft.text}\n\n` +
+        `✅ Reply *thik hai* or *approve* to send this to the public group.\n` +
+        `❌ Reply *nahi* or *reject* to discard.\n` +
+        `🎤 Or record a voice answer — it will be forwarded directly.`,
     });
     return;
   }
 
-  // ── 9. Send to admin group with approval prompt ───────────────────────────
+  // ── 10. Send TTS audio to admin group with approval prompt ────────────────
   const tierLabel =
     draft.type === 'DIRECT'
-      ? '✅ HIGH CONFIDENCE (≥ 0.85) — Based on exact historical wording'
-      : '⚠️ MEDIUM CONFIDENCE (0.60–0.84) — Likely match, needs verification';
+      ? '✅ HIGH CONFIDENCE'
+      : '⚠️ MEDIUM CONFIDENCE';
 
   const approvalCaption =
-    `🎙️ *FATWA DRAFT — AWAITING SHAIKH APPROVAL*\n\n` +
-    `*Pilgrim's Question:*\n"${transcription}"\n\n` +
-    `*Confidence Tier:* ${tierLabel}\n` +
-    `*Composite Score:* ${scoring.compositeScore.toFixed(3)}\n` +
-    `*Category:* ${scoring.topMatch?.category ?? 'Unknown'}\n\n` +
-    `📣 *Shaikh — please reply with a voice note to approve or reject this draft.*\n` +
-    `Approval keywords: *Approve / Haan / Sahi hai / Bilkul / Theek hai*`;
+    `🎙️ *DRAFT — ${tierLabel}*\n` +
+    `*Q:* "${transcription}"\n\n` +
+    `Reply *thik hai* to send, *nahi* to reject, or record your own voice answer.`;
 
-  // Send the TTS audio as a standard audio (not PTT) so Shaikh can listen before deciding
   const sentMsg = await sock.sendMessage(env.ADMIN_GROUP_JID, {
     audio: ttsBuffer,
     mimetype: 'audio/ogg; codecs=opus',
@@ -191,19 +216,14 @@ export async function handleAudioMessage(
     caption: approvalCaption,
   });
 
-  // ── 10. Cache the pending draft ───────────────────────────────────────────
+  // Update cache with real admin message ID if available
   const adminMsgId = sentMsg?.key.id;
   if (adminMsgId) {
-    pendingDrafts.set(adminMsgId, {
-      draftText: draft.text,
-      draftType: draft.type,
-      compositeScore: draft.compositeScore,
-      originalQuestion: transcription,
-      userJid: senderJid,
-      publicGroupJid,
-      publicMsgId: msg.key.id ?? undefined,
-      timestamp: Date.now(),
-    });
-    logger.info({ adminMsgId, userJid: senderJid }, 'Draft cached — awaiting Shaikh approval');
+    const existing = pendingDrafts.get(draftCacheKey);
+    if (existing) {
+      pendingDrafts.delete(draftCacheKey);
+      pendingDrafts.set(adminMsgId, existing);
+      logger.info({ adminMsgId }, 'Draft cache updated with admin message ID');
+    }
   }
 }
