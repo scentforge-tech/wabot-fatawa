@@ -23,3 +23,7 @@ logs/
 # OS artifacts
 .DS_Store
 Thumbs.db
+
+# Firebase service account (contains secrets — never commit)
+firebase-service-account.json
+firebase-service-account.json.json
