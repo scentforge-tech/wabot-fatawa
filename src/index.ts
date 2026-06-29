@@ -2,6 +2,7 @@
 // Cloud Run requires the container to bind PORT within ~4 minutes.
 // We start the server here — BEFORE any other import that might call process.exit().
 import * as http from 'http';
+import * as QRCode from 'qrcode';
 
 const PORT = Number(process.env.PORT) || 8080;
 let latestQr: string | null = null;
@@ -35,15 +36,13 @@ display:flex;align-items:center;justify-content:center;min-height:100vh;}
 <h2>Starting bot...</h2><p style="color:#555;margin-top:8px">Page will refresh automatically</p>
 </div></body></html>`;
 
-function buildQrPage(qrData: string): string {
-  const escaped = qrData.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '');
+function buildQrPage(ts: number): string {
   return `<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Scan QR — WhatsApp Bot</title>
 <meta http-equiv="refresh" content="58">
-<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:'Segoe UI',sans-serif;background:#0a0a0a;color:#fff;
@@ -54,7 +53,8 @@ body{font-family:'Segoe UI',sans-serif;background:#0a0a0a;color:#fff;
        font-size:.8rem;font-weight:700;display:inline-block;margin-bottom:18px;}
 h1{color:#25d366;font-size:1.5rem;margin-bottom:6px;}
 .sub{color:#777;font-size:.9rem;margin-bottom:24px;}
-canvas{border-radius:12px;border:4px solid #25d366;max-width:100%;}
+img.qr{border-radius:12px;border:4px solid #25d366;max-width:100%;width:280px;height:280px;
+        background:#fff;display:block;margin:0 auto;}
 .steps{margin-top:24px;background:#0d1f17;border-radius:10px;padding:16px;text-align:left;}
 .steps li{color:#ccc;margin:8px 0;font-size:.88rem;list-style:none;display:flex;gap:8px;}
 .steps li::before{content:"→";color:#25d366;flex-shrink:0;}
@@ -64,7 +64,7 @@ canvas{border-radius:12px;border:4px solid #25d366;max-width:100%;}
   <div class="badge">📱 SCAN TO CONNECT</div>
   <h1>Link WhatsApp</h1>
   <p class="sub">Scan with the bot's WhatsApp number</p>
-  <canvas id="qr"></canvas>
+  <img class="qr" src="/qr.png?t=${ts}" alt="WhatsApp QR Code">
   <ul class="steps">
     <li>Open <strong>WhatsApp</strong> on your phone</li>
     <li>Tap <strong>⋮ Menu → Linked Devices</strong></li>
@@ -72,21 +72,45 @@ canvas{border-radius:12px;border:4px solid #25d366;max-width:100%;}
     <li>Point camera at the QR code above</li>
   </ul>
   <p class="refresh">⏱ Auto-refreshes every 58s for a new QR</p>
-</div>
-<script>
-QRCode.toCanvas(document.getElementById('qr'),'${escaped}',
-  {width:280,margin:1,color:{dark:'#000',light:'#fff'}},
-  function(err){if(err)console.error(err);});
-</script></body></html>`;
+</div></body></html>`;
 }
 
 // ─── HTTP Server — starts immediately ─────────────────────────────────────────
-const server = http.createServer((_req, res) => {
+const server = http.createServer(async (_req, res) => {
+  const url = _req.url?.split('?')[0] ?? '/';
+
+  // ── /qr.png — server-side PNG of the current QR code ──────────────────────
+  if (url === '/qr.png') {
+    if (!latestQr) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('No QR available yet');
+      return;
+    }
+    try {
+      const pngBuffer = await QRCode.toBuffer(latestQr, {
+        width: 300,
+        margin: 2,
+        color: { dark: '#000000', light: '#ffffff' },
+      });
+      res.writeHead(200, {
+        'Content-Type': 'image/png',
+        'Cache-Control': 'no-store',
+        'Content-Length': pngBuffer.length,
+      });
+      res.end(pngBuffer);
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      res.end('QR generation failed');
+    }
+    return;
+  }
+
+  // ── Default — HTML status page ─────────────────────────────────────────────
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
   if (botConnected) {
     res.end(HTML_CONNECTED);
   } else if (latestQr) {
-    res.end(buildQrPage(latestQr));
+    res.end(buildQrPage(Date.now()));
   } else {
     res.end(HTML_LOADING);
   }

@@ -12,6 +12,7 @@ import * as qrcode from 'qrcode-terminal';
 import { env } from '../config/env';
 import logger from '../config/logger';
 import { handleAudioMessage } from './handlers/audio.handler';
+import { handleTextMessage } from './handlers/text.handler';
 import { handleApprovalMessage } from './handlers/approval.handler';
 
 // ─── State ────────────────────────────────────────────────────────────────────
@@ -181,12 +182,19 @@ export async function startBot(): Promise<void> {
         (msgType === 'documentMessage' &&
           (msg.message?.documentMessage?.mimetype ?? '').startsWith('audio/'));
 
-      logger.info({ isPublicGroup, isAdminGroup, isAudio, msgType, remoteJid }, '🔎 Routing decision');
+      const isText = msgType === 'conversation' || msgType === 'extendedTextMessage';
+
+      logger.info({ isPublicGroup, isAdminGroup, isAudio, isText, msgType, remoteJid }, '🔎 Routing decision');
 
       if (isPublicGroup && isAudio) {
         logger.info({ msgId: msg.key.id }, '🎤 → Audio handler');
         await handleAudioMessage(sock!, msg).catch((err) =>
           logger.error({ err, msgId: msg.key.id }, 'Audio handler error'),
+        );
+      } else if (isPublicGroup && isText) {
+        logger.info({ msgId: msg.key.id }, '💬 → Text handler');
+        await handleTextMessage(sock!, msg).catch((err) =>
+          logger.error({ err, msgId: msg.key.id }, 'Text handler error'),
         );
       } else if (isAdminGroup && (isAudio || msgType === 'conversation' || msgType === 'extendedTextMessage')) {
         // Handle BOTH voice notes (forward to public) AND text approvals (thik hai / nahi)
@@ -195,7 +203,7 @@ export async function startBot(): Promise<void> {
           logger.error({ err, msgId: msg.key.id }, 'Approval handler error'),
         );
       } else {
-        logger.debug({ isPublicGroup, isAdminGroup, isAudio, msgType, remoteJid }, 'No handler matched');
+        logger.debug({ isPublicGroup, isAdminGroup, isAudio, isText, msgType, remoteJid }, 'No handler matched');
       }
     }
   });

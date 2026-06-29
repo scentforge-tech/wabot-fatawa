@@ -30,12 +30,12 @@ export interface PendingDraft {
   timestamp: number;
 }
 
-const pendingDrafts = new Map<string, PendingDraft>();
+export const pendingDrafts = new Map<string, PendingDraft>();
 
 // Auto-expire pending drafts after 24 hours (in ms)
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 
-function cleanExpiredDrafts(): void {
+export function cleanExpiredDrafts(): void {
   const now = Date.now();
   for (const [key, draft] of pendingDrafts) {
     if (now - draft.timestamp > DRAFT_TTL_MS) {
