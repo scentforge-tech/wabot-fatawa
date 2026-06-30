@@ -19,7 +19,15 @@ const GCS_PREFIX  = process.env.GCS_AUTH_PREFIX ?? 'auth/';
 // Return null if GCS is not configured — auth is local-only
 function getStorage(): Storage | null {
   if (!GCS_BUCKET) return null;
-  return new Storage(); // uses GOOGLE_APPLICATION_CREDENTIALS / Cloud Run ADC
+
+  // On Cloud Run: ADC uses the attached service account automatically.
+  // Locally / as fallback: use the Firebase service account key file
+  // which is already used by the rest of the app.
+  const keyFile = process.env.GOOGLE_APPLICATION_CREDENTIALS
+    ?? process.env.FIREBASE_SERVICE_ACCOUNT_PATH
+    ?? undefined;
+
+  return new Storage({ keyFilename: keyFile });
 }
 
 /**
