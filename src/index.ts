@@ -42,7 +42,6 @@ function buildLinkPage(ts: number): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Link WhatsApp — Fatawa Bot</title>
-<meta http-equiv="refresh" content="58">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:'Segoe UI',Tahoma,sans-serif;background:#0a0a0a;color:#fff;
@@ -249,7 +248,7 @@ async function resetAuth() {
   try {
     const resp = await fetch('/reset-auth', { method: 'POST' });
     const data = await resp.json();
-    msgEl.textContent = '✅ Reset done! Page will reload in 4s to show new QR/pairing…';
+    msgEl.textContent = '✅ Reset done! Waiting for new QR…';
     msgEl.className = 'msg info';
     msgEl.style.display = 'block';
     setTimeout(() => location.reload(), 4000);
@@ -261,6 +260,29 @@ async function resetAuth() {
     btn.textContent = '🔄 Reset & Start Fresh';
   }
 }
+
+// ── Auto-detect when bot connects and redirect ──────────────────────────────
+// Poll /api/status every 3 seconds — if connected, reload the page
+// (server will then return HTML_CONNECTED instead of HTML_LINK)
+(function startPolling() {
+  const banner = document.createElement('div');
+  banner.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);'
+    + 'background:#0d1f17;border:1px solid #25d366;color:#25d366;border-radius:8px;'
+    + 'padding:8px 18px;font-size:.8rem;z-index:9999;display:none;';
+  banner.textContent = '✅ WhatsApp connected! Redirecting…';
+  document.body.appendChild(banner);
+
+  setInterval(async () => {
+    try {
+      const r = await fetch('/api/status');
+      const d = await r.json();
+      if (d.connected) {
+        banner.style.display = 'block';
+        setTimeout(() => location.reload(), 1200);
+      }
+    } catch (_) { /* ignore network errors */ }
+  }, 3000);
+})();
 </script>
 </body></html>`;
 }
@@ -336,6 +358,13 @@ const server = http.createServer(async (req, res) => {
         logger.error({ err }, 'Error during auth reset'),
       );
     });
+    return;
+  }
+
+  // ── GET /api/status — JSON polling endpoint for QR page auto-redirect ──────
+  if (url === '/api/status' && method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({ connected: botConnected }));
     return;
   }
 
