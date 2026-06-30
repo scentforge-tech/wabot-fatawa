@@ -14,15 +14,53 @@ const HTML_CONNECTED = `<!DOCTYPE html>
 <style>*{margin:0;padding:0;box-sizing:border-box;}
 body{font-family:'Segoe UI',sans-serif;background:#0a0a0a;color:#fff;
      display:flex;align-items:center;justify-content:center;min-height:100vh;}
-.card{text-align:center;padding:48px;border-radius:20px;background:#111;
-      border:1px solid #1a3a2a;box-shadow:0 0 60px rgba(37,211,102,.2);}
-h1{color:#25d366;font-size:2.2rem;margin-bottom:12px;}
-p{color:#888;font-size:1rem;}</style></head>
+.card{text-align:center;padding:48px 36px;border-radius:20px;background:#111;
+      border:1px solid #1a3a2a;box-shadow:0 0 60px rgba(37,211,102,.2);max-width:420px;width:100%;}
+h1{color:#25d366;font-size:2rem;margin-bottom:12px;}
+p{color:#888;font-size:.95rem;}
+.divider{border:none;border-top:1px solid #1e2e22;margin:28px 0;}
+.btn-reset{width:100%;padding:11px;border:1px solid #3a2a1a;border-radius:10px;
+  background:#1a110a;color:#f59e0b;font-size:.9rem;font-weight:600;cursor:pointer;
+  transition:all .2s;margin-top:0;}
+.btn-reset:hover{background:#2a1a0a;border-color:#f59e0b;}
+.msg{margin-top:12px;font-size:.84rem;padding:10px 12px;border-radius:8px;display:none;}
+.msg.info{background:#0d1f17;color:#6ee7b7;}
+.msg.error{background:#2a0d0d;color:#f87171;border:1px solid #5b1c1c;}
+</style></head>
 <body><div class="card">
 <div style="font-size:4rem;margin-bottom:16px;">✅</div>
 <h1>WhatsApp Connected!</h1>
 <p>The Fatawa bot is live and listening for messages.</p>
 <p style="margin-top:12px;color:#25d366;">No action needed — the bot is running.</p>
+<hr class="divider">
+<p style="color:#555;font-size:.82rem;margin-bottom:14px;">Need to change number or re-link?</p>
+<button class="btn-reset" id="relink-btn" onclick="relinkNumber()">🔄 Change Number / Re-link WhatsApp</button>
+<div class="msg" id="relink-msg"></div>
+<script>
+async function relinkNumber() {
+  const btn = document.getElementById('relink-btn');
+  const msg = document.getElementById('relink-msg');
+  if (!confirm('This will disconnect the current WhatsApp number and show a new QR/pairing screen. Continue?')) return;
+  btn.disabled = true;
+  btn.textContent = '⏳ Clearing session...';
+  try {
+    // First clear Firestore so restart doesn't restore old session
+    await fetch('/clear-firestore-auth', { method: 'POST' });
+    // Then reset local auth and restart bot
+    await fetch('/reset-auth', { method: 'POST' });
+    msg.textContent = '✅ Session cleared! Reloading to link page...';
+    msg.className = 'msg info';
+    msg.style.display = 'block';
+    setTimeout(() => location.reload(), 2500);
+  } catch(e) {
+    msg.textContent = '❌ Error: ' + e.message;
+    msg.className = 'msg error';
+    msg.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = '🔄 Change Number / Re-link WhatsApp';
+  }
+}
+</script>
 </div></body></html>`;
 
 const HTML_LOADING = `<!DOCTYPE html>
@@ -357,6 +395,24 @@ const server = http.createServer(async (req, res) => {
       resetAuthAndRestart().catch((err) =>
         logger.error({ err }, 'Error during auth reset'),
       );
+    });
+    return;
+  }
+
+  // ── POST /clear-firestore-auth — wipe _wabot_auth collection in Firestore ───
+  // Call this BEFORE /reset-auth when changing numbers, so Cloud Run doesn't
+  // restore old credentials from Firestore on the next restart.
+  if (url === '/clear-firestore-auth' && method === 'POST') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
+    setImmediate(async () => {
+      try {
+        const { clearFirestoreAuth } = await import('./bot/auth-firestore');
+        await clearFirestoreAuth();
+        logger.info('Firestore auth cleared via /clear-firestore-auth');
+      } catch (err) {
+        logger.error({ err }, 'Failed to clear Firestore auth');
+      }
     });
     return;
   }

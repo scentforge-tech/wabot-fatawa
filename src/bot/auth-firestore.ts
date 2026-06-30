@@ -96,3 +96,28 @@ export async function uploadFileToFirestore(localFilePath: string, fileName: str
     logger.warn({ err, fileName }, 'Failed to upload auth file to Firestore (non-fatal)');
   }
 }
+
+/**
+ * Delete all auth documents from Firestore.
+ * Call before /reset-auth so Cloud Run doesn't restore old session on restart.
+ */
+export async function clearFirestoreAuth(): Promise<void> {
+  const db = getDb();
+  if (!db) return;
+
+  const BATCH_SIZE = 400;
+  let deleted = 0;
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const snapshot = await db.collection(COLLECTION).limit(BATCH_SIZE).get();
+    if (snapshot.empty) break;
+
+    const batch = db.batch();
+    for (const doc of snapshot.docs) batch.delete(doc.ref);
+    await batch.commit();
+    deleted += snapshot.docs.length;
+  }
+
+  logger.info({ deleted }, '🗑️  Firestore auth cleared');
+}
