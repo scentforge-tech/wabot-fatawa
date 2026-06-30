@@ -477,7 +477,11 @@ const server = http.createServer(async (req, res) => {
     res.write(`event: status\ndata: ${JSON.stringify({ connected: botConnected })}\n\n`);
     const { addSseClient, removeSseClient } = await import('./bot/connection');
     addSseClient(res);
-    req.on('close', () => removeSseClient(res));
+    // Heartbeat every 25s — keeps connection alive through Cloud Run's 60s timeout
+    const heartbeat = setInterval(() => {
+      try { res.write(': heartbeat\n\n'); } catch { clearInterval(heartbeat); }
+    }, 25000);
+    req.on('close', () => { removeSseClient(res); clearInterval(heartbeat); });
     return;
   }
 
