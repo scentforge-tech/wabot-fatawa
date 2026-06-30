@@ -131,20 +131,36 @@ input[type=tel]::placeholder{color:#444;}
 
   <!-- PHONE NUMBER TAB -->
   <div class="pane" id="pane-phone">
-    <div class="steps" style="margin-bottom:20px;"><ul>
-      <li>Open <strong>WhatsApp</strong> on your phone</li>
-      <li>Tap <strong>⋮ Menu → Linked Devices</strong></li>
-      <li>Tap <strong>"Link a Device"</strong></li>
+
+    <!-- ⚠️ Important explanation box -->
+    <div style="background:#1a1a0a;border:1px solid #7c6a00;border-radius:10px;padding:14px 16px;margin-bottom:18px;">
+      <p style="color:#fbbf24;font-size:.83rem;font-weight:700;margin-bottom:6px;">⚠️ Read this first</p>
+      <p style="color:#d4a400;font-size:.8rem;line-height:1.5;">
+        The number below = <strong>the bot's own WhatsApp number</strong> (the SIM/phone the bot runs on).<br>
+        The 8-char code must be entered on <strong>that exact same phone</strong> — the one whose number you type here.<br>
+        <span style="color:#f59e0b;">If they don't match, WhatsApp will say "check the phone number".</span>
+      </p>
+    </div>
+
+    <div class="steps" style="margin-bottom:18px;"><ul>
+      <li>On the <strong>bot's phone</strong> open WhatsApp</li>
+      <li>Tap <strong>⋮ Menu → Linked Devices → Link a Device</strong></li>
       <li>Tap <strong>"Link with phone number instead"</strong></li>
-      <li>Enter the <strong>8-character code</strong> shown below</li>
+      <li>WhatsApp asks for your number — enter it, then it shows a code</li>
+      <li><strong>Ignore that code</strong> — enter the code shown on THIS page instead</li>
     </ul></div>
 
     <div class="form-group">
-      <label for="phone-input">Bot's WhatsApp phone number</label>
-      <input type="tel" id="phone-input" placeholder="923001234567  (country code + number, digits only)"
+      <label for="phone-input">Bot's WhatsApp phone number (digits only, with country code)</label>
+      <input type="tel" id="phone-input" placeholder="e.g. 96512345678"
              oninput="document.getElementById('code-box').style.display='none';
                       document.getElementById('msg-box').style.display='none';">
-      <div style="color:#555;font-size:.78rem;margin-top:5px">No +, no spaces, no dashes. Example: <code style="color:#25d366">923001234567</code> for +92-300-1234567</div>
+      <div style="color:#555;font-size:.78rem;margin-top:5px">
+        No +, no spaces, no dashes &nbsp;·&nbsp;
+        Kuwait: <code style="color:#25d366">96512345678</code> &nbsp;·&nbsp;
+        Pakistan: <code style="color:#25d366">923001234567</code> &nbsp;·&nbsp;
+        Saudi: <code style="color:#25d366">966501234567</code>
+      </div>
     </div>
     <button class="btn" id="get-code-btn" onclick="requestCode()">Get Pairing Code</button>
 
@@ -152,12 +168,12 @@ input[type=tel]::placeholder{color:#444;}
 
     <div class="code-box" id="code-box">
       <div class="code-display" id="code-display"></div>
-      <p class="code-label">Enter this code in WhatsApp → Linked Devices → Link with phone number</p>
-      <p style="color:#f59e0b;font-size:.78rem;margin-top:8px">⏱ Code expires in ~60 seconds</p>
+      <p class="code-label">Enter this code on the <strong>bot's phone</strong>: WhatsApp → Linked Devices → Link with phone number</p>
+      <p style="color:#f59e0b;font-size:.78rem;margin-top:8px">⏱ Code expires in ~60 seconds — enter it quickly</p>
     </div>
 
     <div style="margin-top:24px;padding-top:20px;border-top:1px solid #1a2e22;text-align:center">
-      <p style="color:#555;font-size:.8rem;margin-bottom:10px">Entered wrong code or stuck? Reset the session:</p>
+      <p style="color:#555;font-size:.8rem;margin-bottom:10px">Got an error or entered a wrong code? Reset the session:</p>
       <button class="btn" id="reset-btn" onclick="resetAuth()"
         style="background:#1a1a1a;color:#f87171;border:1px solid #5b1c1c;font-size:.85rem;padding:9px">
         🔄 Reset &amp; Start Fresh
@@ -165,6 +181,7 @@ input[type=tel]::placeholder{color:#444;}
       <div class="msg" id="reset-msg" style="margin-top:10px"></div>
     </div>
   </div>
+
 </div>
 
 <script>
