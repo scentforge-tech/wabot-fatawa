@@ -20,14 +20,27 @@ const GCS_PREFIX  = process.env.GCS_AUTH_PREFIX ?? 'auth/';
 function getStorage(): Storage | null {
   if (!GCS_BUCKET) return null;
 
-  // On Cloud Run: ADC uses the attached service account automatically.
-  // Locally / as fallback: use the Firebase service account key file
-  // which is already used by the rest of the app.
-  const keyFile = process.env.GOOGLE_APPLICATION_CREDENTIALS
-    ?? process.env.FIREBASE_SERVICE_ACCOUNT_PATH
-    ?? undefined;
+  // Priority 1: Explicit keyfile path (local dev with firebase-service-account.json)
+  const keyFilePath = process.env.GOOGLE_APPLICATION_CREDENTIALS
+    ?? process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
+  if (keyFilePath) {
+    return new Storage({ keyFilename: keyFilePath });
+  }
 
-  return new Storage({ keyFilename: keyFile });
+  // Priority 2: Firebase SA JSON injected as Secret Manager secret (Cloud Run)
+  // The secret is mounted as env var FIREBASE_SERVICE_ACCOUNT_JSON
+  const saJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  if (saJson) {
+    try {
+      const creds = JSON.parse(saJson);
+      return new Storage({ credentials: creds });
+    } catch (e) {
+      logger.warn({ e }, 'Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON');
+    }
+  }
+
+  // Priority 3: Application Default Credentials (Cloud Run Compute SA)
+  return new Storage();
 }
 
 /**

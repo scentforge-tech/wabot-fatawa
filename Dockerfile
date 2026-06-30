@@ -40,11 +40,9 @@ RUN npm ci --omit=dev && npm cache clean --force
 # Copy compiled output from builder
 COPY --from=builder /app/dist ./dist
 
-# ── WhatsApp Auth Credentials ───────────────────────────────
-# Cloud Build (cloudbuild.yaml Step 0) downloads auth_info_baileys/ from GCS
-# before running docker build, so the credentials are baked into the image.
-# If the directory is empty (first deploy), the bot will show the QR page.
-COPY auth_info_baileys/ /app/auth_info_baileys/
+# Auth credentials are downloaded from GCS at runtime by auth-gcs.ts
+# (using FIREBASE_SERVICE_ACCOUNT_JSON secret mounted by Cloud Run)
+RUN mkdir -p /app/auth_info_baileys
 
 # tmp/ is truly ephemeral — just create the directory
 RUN mkdir -p /app/tmp
