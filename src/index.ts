@@ -9,59 +9,6 @@ let latestQr: string | null = null;
 let botConnected = false;
 
 // HTML pages defined before server so they're in scope
-const HTML_CONNECTED = `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>WhatsApp Bot ✅</title>
-<style>*{margin:0;padding:0;box-sizing:border-box;}
-body{font-family:'Segoe UI',sans-serif;background:#0a0a0a;color:#fff;
-     display:flex;align-items:center;justify-content:center;min-height:100vh;}
-.card{text-align:center;padding:48px 36px;border-radius:20px;background:#111;
-      border:1px solid #1a3a2a;box-shadow:0 0 60px rgba(37,211,102,.2);max-width:420px;width:100%;}
-h1{color:#25d366;font-size:2rem;margin-bottom:12px;}
-p{color:#888;font-size:.95rem;}
-.divider{border:none;border-top:1px solid #1e2e22;margin:28px 0;}
-.btn-reset{width:100%;padding:11px;border:1px solid #3a2a1a;border-radius:10px;
-  background:#1a110a;color:#f59e0b;font-size:.9rem;font-weight:600;cursor:pointer;
-  transition:all .2s;margin-top:0;}
-.btn-reset:hover{background:#2a1a0a;border-color:#f59e0b;}
-.msg{margin-top:12px;font-size:.84rem;padding:10px 12px;border-radius:8px;display:none;}
-.msg.info{background:#0d1f17;color:#6ee7b7;}
-.msg.error{background:#2a0d0d;color:#f87171;border:1px solid #5b1c1c;}
-</style></head>
-<body><div class="card">
-<div style="font-size:4rem;margin-bottom:16px;">✅</div>
-<h1>WhatsApp Connected!</h1>
-<p>The Fatawa bot is live and listening for messages.</p>
-<p style="margin-top:12px;color:#25d366;">No action needed — the bot is running.</p>
-<hr class="divider">
-<p style="color:#555;font-size:.82rem;margin-bottom:14px;">Need to change number or re-link?</p>
-<button class="btn-reset" id="relink-btn" onclick="relinkNumber()">🔄 Change Number / Re-link WhatsApp</button>
-<div class="msg" id="relink-msg"></div>
-<script>
-async function relinkNumber() {
-  const btn = document.getElementById('relink-btn');
-  const msg = document.getElementById('relink-msg');
-  if (!confirm('This will disconnect the current WhatsApp number and show a new QR/pairing screen. Continue?')) return;
-  btn.disabled = true;
-  btn.textContent = '⏳ Clearing session...';
-  try {
-    // First clear Firestore so restart doesn't restore old session
-    await fetch('/clear-firestore-auth', { method: 'POST' });
-    // Then reset local auth and restart bot
-    await fetch('/reset-auth', { method: 'POST' });
-    msg.textContent = '✅ Session cleared! Reloading to link page...';
-    msg.className = 'msg info';
-    msg.style.display = 'block';
-    setTimeout(() => location.reload(), 2500);
-  } catch(e) {
-    msg.textContent = '❌ Error: ' + e.message;
-    msg.className = 'msg error';
-    msg.style.display = 'block';
-    btn.disabled = false;
-    btn.textContent = '🔄 Change Number / Re-link WhatsApp';
-  }
-}
-</script>
-</div></body></html>`;
 
 const HTML_LOADING = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Starting...</title>
@@ -424,10 +371,100 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // ── Default — HTML status page ─────────────────────────────────────────────
+  // ── GET /api/groups — fetch all WhatsApp groups the bot is in ───────────────
+  if (url === '/api/groups' && method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    try {
+      const { getSocket } = await import('./bot/connection');
+      const sock = getSocket();
+      if (!sock) { res.end(JSON.stringify({ groups: [], error: 'Bot not connected' })); return; }
+      const raw = await sock.groupFetchAllParticipating();
+      const groups = Object.entries(raw).map(([id, meta]: [string, any]) => ({
+        id,
+        name: meta.subject ?? id,
+        participants: meta.participants?.length ?? 0,
+      })).sort((a, b) => a.name.localeCompare(b.name));
+      res.end(JSON.stringify({ groups }));
+    } catch (err) {
+      res.end(JSON.stringify({ groups: [], error: String(err) }));
+    }
+    return;
+  }
+
+  // ── GET /api/settings — load current group selections ───────────────────────
+  if (url === '/api/settings' && method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    const { getGroupSettings } = await import('./services/settings.service');
+    res.end(JSON.stringify(getGroupSettings()));
+    return;
+  }
+
+  // ── POST /api/settings — save group selections to Firestore ─────────────────
+  if (url === '/api/settings' && method === 'POST') {
+    let body = '';
+    req.on('data', (chunk) => body += chunk);
+    req.on('end', async () => {
+      try {
+        const { publicGroupJid, adminGroupJid } = JSON.parse(body);
+        const { saveGroupSettings } = await import('./services/settings.service');
+        const saved = await saveGroupSettings({ publicGroupJid, adminGroupJid });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, settings: saved }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: String(err) }));
+      }
+    });
+    return;
+  }
+
+  // ── GET /api/events — SSE stream for dashboard real-time updates ─────────────
+  if (url === '/api/events' && method === 'GET') {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.write(':ok\n\n');
+    // Send current status immediately
+    res.write(`event: status\ndata: ${JSON.stringify({ connected: botConnected })}\n\n`);
+    const { addSseClient, removeSseClient } = await import('./bot/connection');
+    addSseClient(res);
+    req.on('close', () => removeSseClient(res));
+    return;
+  }
+
+  // ── POST /api/send — send a message from the dashboard ──────────────────────
+  if (url === '/api/send' && method === 'POST') {
+    let body = '';
+    req.on('data', (chunk) => body += chunk);
+    req.on('end', async () => {
+      try {
+        const { jid, text } = JSON.parse(body);
+        if (!jid || !text) throw new Error('jid and text are required');
+        const { getSocket, emitDashboardEvent } = await import('./bot/connection');
+        const sock = getSocket();
+        if (!sock) throw new Error('Bot not connected');
+        await sock.sendMessage(jid, { text });
+        emitDashboardEvent('bot_message', { id: Date.now()+'', remoteJid: jid,
+          pushName: 'Bot (manual)', fromMe: true, msgType: 'conversation',
+          text, timestamp: Date.now() });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: String(err) }));
+      }
+    });
+    return;
+  }
+
+  // ── Default — HTML page ────────────────────────────────────────────────────
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
   if (botConnected) {
-    res.end(HTML_CONNECTED);
+    const { buildDashboardHTML } = await import('./bot/dashboard');
+    res.end(buildDashboardHTML());
   } else if (latestQr) {
     res.end(buildLinkPage(Date.now()));
   } else {

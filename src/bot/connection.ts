@@ -17,6 +17,32 @@ import { handleAudioMessage } from './handlers/audio.handler';
 import { handleTextMessage } from './handlers/text.handler';
 import { handleApprovalMessage } from './handlers/approval.handler';
 import { downloadAuthFromFirestore, uploadFileToFirestore } from './auth-firestore';
+import { loadGroupSettings, getGroupSettings } from '../services/settings.service';
+import type { ServerResponse } from 'http';
+
+// ─── Dashboard SSE clients ────────────────────────────────────────────────────
+const _sseClients: Set<ServerResponse> = new Set();
+
+export function addSseClient(res: ServerResponse): void { _sseClients.add(res); }
+export function removeSseClient(res: ServerResponse): void { _sseClients.delete(res); }
+
+export interface DashboardMessage {
+  id: string;
+  remoteJid: string;
+  groupName?: string;
+  pushName?: string;
+  fromMe: boolean;
+  msgType: string;
+  text?: string;
+  timestamp: number;
+}
+
+export function emitDashboardEvent(event: string, data: unknown): void {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const client of _sseClients) {
+    try { client.write(payload); } catch { _sseClients.delete(client); }
+  }
+}
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -140,7 +166,9 @@ export async function startBot(): Promise<void> {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   }
 
-  // Restore auth from Firestore if the local directory is empty (Cloud Run restarts)
+  // Load group settings from Firestore (replaces env var hardcoding)
+  await loadGroupSettings();
+
   const hasLocalAuth = fs.existsSync(env.AUTH_DIR) &&
     fs.readdirSync(env.AUTH_DIR).length > 0;
   if (!hasLocalAuth) {
@@ -276,8 +304,25 @@ export async function startBot(): Promise<void> {
       }
 
       // ── Normal operation ──────────────────────────────────────────────────
-      const isPublicGroup = remoteJid === env.PUBLIC_GROUP_JID;
-      const isAdminGroup  = remoteJid === env.ADMIN_GROUP_JID;
+      const settings = getGroupSettings();
+      const isPublicGroup = remoteJid === settings.publicGroupJid;
+      const isAdminGroup  = remoteJid === settings.adminGroupJid;
+
+      // Emit to dashboard SSE clients
+      const textContent = msg.message?.conversation
+        ?? msg.message?.extendedTextMessage?.text
+        ?? undefined;
+      emitDashboardEvent('message', {
+        id: msg.key.id ?? '',
+        remoteJid,
+        pushName: msg.pushName ?? undefined,
+        fromMe,
+        msgType,
+        text: textContent,
+        timestamp: Date.now(),
+        isPublicGroup,
+        isAdminGroup,
+      });
 
       // Catch all audio variants WhatsApp uses
       const isAudio =
