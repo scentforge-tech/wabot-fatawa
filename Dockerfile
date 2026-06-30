@@ -40,13 +40,14 @@ RUN npm ci --omit=dev && npm cache clean --force
 # Copy compiled output from builder
 COPY --from=builder /app/dist ./dist
 
-# ── Persistent Volume Mounts ─────────────────────────────────
-# auth_info_baileys/ — WhatsApp session tokens (MUST persist across restarts)
-# tmp/              — Temporary audio conversion workspace
-VOLUME ["/app/auth_info_baileys", "/app/tmp"]
+# ── WhatsApp Auth Credentials ───────────────────────────────
+# Cloud Build (cloudbuild.yaml Step 0) downloads auth_info_baileys/ from GCS
+# before running docker build, so the credentials are baked into the image.
+# If the directory is empty (first deploy), the bot will show the QR page.
+COPY auth_info_baileys/ /app/auth_info_baileys/
 
-# Create directories in image (bind-mount will override in compose)
-RUN mkdir -p /app/auth_info_baileys /app/tmp
+# tmp/ is truly ephemeral — just create the directory
+RUN mkdir -p /app/tmp
 
 # Non-root user for security
 RUN groupadd --gid 1001 botuser && \

@@ -1,4 +1,17 @@
 steps:
+  # ── Step 0: Restore WhatsApp auth from GCS ─────────────────────────────────
+  # Downloads auth_info_baileys/ into the build workspace so Docker can bake
+  # the credentials directly into the image (no runtime GCS access needed).
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        mkdir -p auth_info_baileys
+        gsutil -m cp -r gs://masjidmap-5yvj5-wabot-auth/auth/. auth_info_baileys/ \
+          && echo "Auth files restored from GCS" \
+          || echo "WARNING: No auth files in GCS - bot will show QR on first run"
+
   # Build the Docker image
   - name: 'gcr.io/cloud-builders/docker'
     args: ['build', '-t', 'gcr.io/$PROJECT_ID/wabot-fatawa', '.']
@@ -8,16 +21,6 @@ steps:
     args: ['push', 'gcr.io/$PROJECT_ID/wabot-fatawa']
 
   # Deploy to Cloud Run
-  # ─────────────────────────────────────────────────────────────────────────────
-  # REQUIRED: Set these secrets in Google Secret Manager BEFORE deploying:
-  #   gcloud secrets create GEMINI_API_KEY --data-file=- <<< "your-key"
-  #   gcloud secrets create ADMIN_GROUP_JID --data-file=- <<< "120363410146314352@g.us"
-  #   gcloud secrets create PUBLIC_GROUP_JID --data-file=- <<< "120363411626539147@g.us"
-  #   gcloud secrets create FIREBASE_PROJECT_ID --data-file=- <<< "masjidmap-5yvj5"
-  #
-  # Cloud Run uses the attached service account for Firebase (Application Default Credentials)
-  # No firebase-service-account.json needed in the container.
-  # ─────────────────────────────────────────────────────────────────────────────
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
     args:

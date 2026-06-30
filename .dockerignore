@@ -1,7 +1,9 @@
 node_modules/
 dist/
 .env
-auth_info_baileys/
+# auth_info_baileys is intentionally NOT excluded here
+# Cloud Build downloads it from GCS before docker build so credentials
+# are baked into the image — see cloudbuild.yaml Step 0
 tmp/
 *.log
 *.tsbuildinfo
