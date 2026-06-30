@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>🕌 Huda AI – Hajj Q&A Review App</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --bg:        #0F1117;
+  --bg2:       #161B27;
+  --bg3:       #1E2435;
+  --border:    #2A3245;
+  --accent:    #3D8EFF;
+  --accent2:   #00E5A0;
+  --gold:      #F5A623;
+  --red:       #FF4D6A;
+  --green:     #00C97D;
+  --orange:    #FF9B40;
+  --purple:    #A78BFA;
+  --text:      #E2E8F0;
+  --text2:     #94A3B8;
+  --text3:     #64748B;
+  --radius:    12px;
+  --shadow:    0 4px 24px rgba(0,0,0,0.4);
+  --shadow-lg: 0 8px 48px rgba(0,0,0,0.6);
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; overflow-x: hidden; }
+
+/* ── HEADER ── */
+.header {
+  position: sticky; top: 0; z-index: 100;
+  background: linear-gradient(135deg, #0D1220 0%, #1A2040 100%);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(20px);
+  padding: 0 24px;
+  display: flex; align-items: center; gap: 16px; height: 64px;
+  box-shadow: 0 2px 20px rgba(0,0,0,0.5);
+}
+.header-logo { font-size: 24px; }
+.header-title { font-size: 18px; font-weight: 700; color: var(--text); }
+.header-sub   { font-size: 12px; color: var(--text2); margin-top: 2px; }
+.header-stats { margin-left: auto; display: flex; gap: 12px; }
+.stat-badge {
+  background: var(--bg3); border: 1px solid var(--border);
+  padding: 4px 12px; border-radius: 20px; font-size: 12px;
+  font-weight: 600; color: var(--text2);
+  display: flex; align-items: center; gap: 6px;
+}
+.stat-badge.green { color: var(--green); border-color: rgba(0,201,125,0.3); }
+.stat-badge.orange{ color: var(--orange); border-color: rgba(255,155,64,0.3); }
+.stat-badge.red   { color: var(--red);   border-color: rgba(255,77,106,0.3); }
+.stat-badge.blue  { color: var(--accent);border-color: rgba(61,142,255,0.3); }
+
+/* ── LAYOUT ── */
+.layout { display: flex; height: calc(100vh - 64px); }
+
+/* ── SIDEBAR ── */
+.sidebar {
+  width: 300px; min-width: 300px;
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.sidebar-inner { flex: 1; overflow-y: auto; padding: 16px 12px; }
+.sidebar-inner::-webkit-scrollbar { width: 4px; }
+.sidebar-inner::-webkit-scrollbar-track { background: transparent; }
+.sidebar-inner::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+.filters-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--text3); margin-bottom: 12px; padding-left: 4px; }
+
+.filter-group { margin-bottom: 20px; }
+.filter-label { font-size: 11px; font-weight: 600; color: var(--text2); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+.search-box {
+  width: 100%; background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 12px; color: var(--text);
+  font-family: 'Inter', sans-serif; font-size: 13px; outline: none;
+  transition: border-color 0.2s;
+}
+.search-box:focus { border-color: var(--accent); }
+.search-box::placeholder { color: var(--text3); }
+
+select.filter-select {
+  width: 100%; background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 12px; color: var(--text);
+  font-family: 'Inter', sans-serif; font-size: 12px; outline: none; cursor: pointer;
+}
+select.filter-select:focus { border-color: var(--accent); }
+
+.filter-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; cursor: pointer;
+  border: 1px solid var(--border); background: var(--bg3); color: var(--text2);
+  transition: all 0.15s; user-select: none;
+}
+.chip:hover, .chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.chip.ans    { border-color: rgba(0,201,125,0.4); color: var(--green); }
+.chip.ans.active { background: var(--green); color: #000; }
+.chip.unans  { border-color: rgba(255,77,106,0.4); color: var(--red); }
+.chip.unans.active { background: var(--red); color: #fff; }
+
+.count-badge { font-size: 10px; opacity: 0.7; margin-left: 4px; }
+
+/* ── STAGE PILLS ── */
+.stage-list { display: flex; flex-direction: column; gap: 4px; }
+.stage-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 10px; border-radius: 8px; cursor: pointer; font-size: 12px;
+  border: 1px solid transparent; transition: all 0.15s; color: var(--text2);
+}
+.stage-item:hover  { background: var(--bg3); border-color: var(--border); }
+.stage-item.active { background: rgba(61,142,255,0.15); border-color: rgba(61,142,255,0.4); color: var(--accent); }
+.stage-count { font-size: 10px; background: var(--bg3); padding: 2px 7px; border-radius: 10px; font-weight: 700; }
+
+/* ── MAIN ── */
+.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+/* ── TOOLBAR ── */
+.toolbar {
+  display: flex; align-items: center; gap: 12px; padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+}
+.toolbar-info { font-size: 13px; color: var(--text2); }
+.toolbar-info strong { color: var(--text); }
+.toolbar-actions { margin-left: auto; display: flex; gap: 8px; }
+.btn {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 14px; border-radius: 8px; border: none; cursor: pointer;
+  font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 600;
+  transition: all 0.15s;
+}
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover { background: #2D7EEF; }
+.btn-success { background: var(--green); color: #000; }
+.btn-success:hover { background: #00B870; }
+.btn-ghost { background: var(--bg3); color: var(--text2); border: 1px solid var(--border); }
+.btn-ghost:hover { color: var(--text); border-color: var(--accent); }
+
+/* ── TABLE AREA ── */
+.table-area { flex: 1; overflow-y: auto; padding: 0; }
+.table-area::-webkit-scrollbar { width: 6px; }
+.table-area::-webkit-scrollbar-track { background: var(--bg); }
+.table-area::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+thead tr { position: sticky; top: 0; z-index: 10; background: var(--bg3); }
+th {
+  padding: 10px 12px; text-align: left; font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.8px; color: var(--text3);
+  border-bottom: 2px solid var(--border); white-space: nowrap;
+}
+td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+tr:hover td { background: rgba(61,142,255,0.04); }
+tr.selected td { background: rgba(61,142,255,0.10) !important; }
+.row-num { color: var(--text3); font-size: 11px; font-family: 'JetBrains Mono', monospace; }
+.vec-id {
+  font-family: 'JetBrains Mono', monospace; font-size: 11px;
+  color: var(--accent); background: rgba(61,142,255,0.1);
+  padding: 2px 6px; border-radius: 4px; white-space: nowrap;
+}
+.tax-id {
+  font-family: 'JetBrains Mono', monospace; font-size: 10px;
+  color: var(--gold); background: rgba(245,166,35,0.1);
+  padding: 2px 6px; border-radius: 4px; white-space: nowrap;
+}
+.q-text { max-width: 280px; line-height: 1.5; color: var(--text); }
+.q-text-clip { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.q-audio-link { font-size: 10px; color: var(--orange); margin-top: 3px; display: flex; align-items: center; gap: 4px; }
+.stage-tag {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-size: 10px; font-weight: 700; background: var(--bg3);
+  border: 1px solid var(--border); white-space: nowrap;
+}
+.ans-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 8px; border-radius: 8px; font-size: 11px; font-weight: 700;
+  white-space: nowrap;
+}
+.ans-badge.yes  { background: rgba(0,201,125,0.15); color: var(--green); }
+.ans-badge.no   { background: rgba(255,77,106,0.15); color: var(--red); }
+.ans-badge.audio{ background: rgba(255,155,64,0.15); color: var(--orange); }
+.rel-badge {
+  font-size: 10px; padding: 2px 7px; border-radius: 8px; font-weight: 600;
+}
+.rel-badge.follow-up     { background: rgba(61,142,255,0.15); color: var(--accent); }
+.rel-badge.clarification { background: rgba(245,166,35,0.15); color: var(--gold); }
+.rel-badge.duplicate     { background: rgba(255,77,106,0.15); color: var(--red); }
+.rel-badge.related       { background: rgba(167,139,250,0.15); color: var(--purple); }
+.lang-badge {
+  font-size: 10px; padding: 2px 7px; border-radius: 8px; font-weight: 600;
+  background: var(--bg3); border: 1px solid var(--border);
+}
+
+/* ── DETAIL PANEL ── */
+.detail-panel {
+  position: fixed; right: 0; top: 64px; bottom: 0;
+  width: 480px; background: var(--bg2);
+  border-left: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  transform: translateX(100%); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 50; box-shadow: var(--shadow-lg);
+}
+.detail-panel.open { transform: translateX(0); }
+.detail-header {
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px; background: var(--bg3);
+}
+.detail-title { font-size: 14px; font-weight: 700; flex: 1; }
+.detail-close { cursor: pointer; color: var(--text3); font-size: 18px; transition: color 0.15s; }
+.detail-close:hover { color: var(--text); }
+.detail-body { flex: 1; overflow-y: auto; padding: 20px; }
+.detail-body::-webkit-scrollbar { width: 4px; }
+.detail-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+.detail-section { margin-bottom: 20px; }
+.detail-section-title {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+  color: var(--text3); margin-bottom: 10px; padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px;
+}
+.detail-field { margin-bottom: 12px; }
+.detail-field-label { font-size: 10px; color: var(--text3); font-weight: 600; text-transform: uppercase; margin-bottom: 4px; }
+.detail-field-value { font-size: 12px; color: var(--text); line-height: 1.6; }
+.detail-field-value.mono { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); }
+.detail-field-value.transcript {
+  background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px; font-size: 12px; line-height: 1.8;
+  color: var(--text2); max-height: 160px; overflow-y: auto;
+  font-family: 'JetBrains Mono', monospace;
+}
+.detail-field-value.answer-text {
+  background: rgba(0,201,125,0.08); border: 1px solid rgba(0,201,125,0.2);
+  border-radius: 8px; padding: 12px; font-size: 12px; line-height: 1.8; color: var(--text);
+}
+
+/* Audio player */
+.audio-player { margin-top: 8px; }
+.audio-player audio { width: 100%; height: 36px; }
+
+/* Edit section */
+.edit-section { background: var(--bg3); border-radius: 10px; padding: 16px; margin-top: 16px; }
+.edit-title { font-size: 11px; font-weight: 700; color: var(--gold); margin-bottom: 12px; text-transform: uppercase; }
+.edit-field { margin-bottom: 10px; }
+.edit-label { font-size: 10px; color: var(--text2); margin-bottom: 4px; font-weight: 600; text-transform: uppercase; }
+.edit-input {
+  width: 100%; background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 7px 10px; color: var(--text);
+  font-family: 'Inter', sans-serif; font-size: 12px; outline: none;
+}
+.edit-input:focus { border-color: var(--accent); }
+.edit-actions { display: flex; gap: 8px; margin-top: 12px; }
+
+/* ── DASHBOARD ── */
+.dashboard { padding: 24px; }
+.dash-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+.dash-card {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 20px;
+  display: flex; align-items: flex-start; gap: 16px;
+}
+.dash-card-icon { font-size: 28px; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; border-radius: 12px; }
+.dash-card-val  { font-size: 28px; font-weight: 800; line-height: 1; }
+.dash-card-lbl  { font-size: 12px; color: var(--text2); margin-top: 4px; }
+.dash-card.blue  .dash-card-icon { background: rgba(61,142,255,0.15); }
+.dash-card.green .dash-card-icon { background: rgba(0,201,125,0.15); }
+.dash-card.orange .dash-card-icon { background: rgba(255,155,64,0.15); }
+.dash-card.red   .dash-card-icon { background: rgba(255,77,106,0.15); }
+
+/* Bar chart */
+.bar-section { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; }
+.bar-title { font-size: 13px; font-weight: 700; margin-bottom: 16px; }
+.bar-item { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.bar-label { width: 200px; font-size: 11px; color: var(--text2); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar-track { flex: 1; height: 18px; background: var(--bg3); border-radius: 4px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 4px; transition: width 0.6s ease; display: flex; align-items: center; justify-content: flex-end; padding-right: 6px; font-size: 10px; font-weight: 700; color: rgba(255,255,255,0.9); }
+.bar-count { width: 40px; font-size: 11px; font-weight: 700; color: var(--text2); text-align: right; }
+
+/* ── LOADING / EMPTY ── */
+.loading { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 300px; gap: 16px; color: var(--text2); }
+.spinner { width: 40px; height: 40px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── TABS ── */
+.tabs { display: flex; gap: 2px; padding: 12px 20px 0; border-bottom: 1px solid var(--border); background: var(--bg2); }
+.tab {
+  padding: 8px 16px; cursor: pointer; font-size: 13px; font-weight: 600;
+  color: var(--text2); border-radius: 8px 8px 0 0;
+  border: 1px solid transparent; border-bottom: none;
+  transition: all 0.15s; margin-bottom: -1px;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--text); background: var(--bg); border-color: var(--border); border-bottom-color: var(--bg); }
+
+/* ── TOAST ── */
+.toast {
+  position: fixed; bottom: 24px; right: 24px; z-index: 200;
+  background: var(--bg3); border: 1px solid var(--border);
+  padding: 12px 20px; border-radius: 10px; font-size: 13px;
+  box-shadow: var(--shadow); transform: translateY(80px); opacity: 0;
+  transition: all 0.3s;
+}
+.toast.show { transform: translateY(0); opacity: 1; }
+.toast.success { border-color: rgba(0,201,125,0.5); color: var(--green); }
+.toast.error   { border-color: rgba(255,77,106,0.5); color: var(--red); }
+
+/* ── PAGINATION ── */
+.pagination { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 14px; border-top: 1px solid var(--border); background: var(--bg2); }
+.page-btn { padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg3); color: var(--text2); cursor: pointer; font-size: 12px; transition: all 0.15s; }
+.page-btn:hover { border-color: var(--accent); color: var(--text); }
+.page-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.page-info { font-size: 12px; color: var(--text2); }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="header-logo">🕌</div>
+  <div>
+    <div class="header-title">Huda AI – Hajj Q&A Review</div>
+    <div class="header-sub">Categorize · Review · Export</div>
+  </div>
+  <div class="header-stats" id="headerStats">
+    <div class="stat-badge blue">⏳ Loading...</div>
+  </div>
+</div>
+
+<!-- TABS -->
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('table')">📋 Q&A Table</div>
+  <div class="tab" onclick="switchTab('dashboard')">📊 Dashboard</div>
+</div>
+
+<!-- LAYOUT -->
+<div class="layout" id="tableView">
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sidebar-inner">
+      <div class="filters-title">🔍 Filters</div>
+
+      <div class="filter-group">
+        <div class="filter-label">Search</div>
+        <input type="text" class="search-box" placeholder="Search questions, answers, IDs..." oninput="applyFilters()" id="searchInput"/>
+      </div>
+
+      <div class="filter-group">
+        <div class="filter-label">Answer Status</div>
+        <div class="filter-chips">
+          <div class="chip" onclick="toggleChip(this,'ans_all')" data-filter="ans_all">All</div>
+          <div class="chip ans" onclick="toggleChip(this,'ans_yes')" data-filter="ans_yes">✅ Answered</div>
+          <div class="chip unans" onclick="toggleChip(this,'ans_no')" data-filter="ans_no">❌ Unanswered</div>
+        </div>
+      </div>
+
+      <div class="filter-group">
+        <div class="filter-label">Question Type</div>
+        <select class="filter-select" onchange="applyFilters()" id="typeFilter">
+          <option value="">All Types</option>
+          <option value="Text">Text</option>
+          <option value="Audio">Audio</option>
+          <option value="Text+Audio">Text + Audio</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <div class="filter-label">Language</div>
+        <select class="filter-select" onchange="applyFilters()" id="langFilter">
+          <option value="">All Languages</option>
+          <option value="Hinglish">Hinglish</option>
+          <option value="Audio: Urdu">Urdu (Audio)</option>
+          <option value="Urdu">Urdu</option>
+          <option value="English">English</option>
+          <option value="Mixed">Mixed</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <div class="filter-label">Relationship</div>
+        <select class="filter-select" onchange="applyFilters()" id="relFilter">
+          <option value="">All</option>
+          <option value="Follow-up">Follow-up</option>
+          <option value="Clarification">Clarification</option>
+          <option value="Related">Related</option>
+          <option value="Duplicate">Duplicate</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <div class="filter-label">Hajj Stage</div>
+        <div class="stage-list" id="stageList"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN TABLE AREA -->
+  <div class="main">
+    <div class="toolbar">
+      <div class="toolbar-info">Showing <strong id="showingCount">0</strong> of <strong id="totalCount">0</strong> questions</div>
+      <div class="toolbar-actions">
+        <button class="btn btn-ghost" onclick="exportExcel()">💾 Export Updated Excel</button>
+        <button class="btn btn-success" onclick="clearFilters()">🔄 Clear Filters</button>
+      </div>
+    </div>
+
+    <div class="table-area" id="tableArea">
+      <div class="loading"><div class="spinner"></div><div>Loading Q&A data...</div></div>
+    </div>
+
+    <div class="pagination" id="pagination"></div>
+  </div>
+</div>
+
+<!-- DASHBOARD VIEW -->
+<div id="dashboardView" style="display:none; overflow-y:auto; height:calc(100vh - 112px);">
+  <div class="dashboard" id="dashboardContent">
+    <div class="loading"><div class="spinner"></div><div>Loading dashboard...</div></div>
+  </div>
+</div>
+
+<!-- DETAIL PANEL -->
+<div class="detail-panel" id="detailPanel">
+  <div class="detail-header">
+    <div class="detail-title" id="detailTitle">Question Detail</div>
+    <div class="detail-close" onclick="closeDetail()">✕</div>
+  </div>
+  <div class="detail-body" id="detailBody"></div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+const API = "http://localhost:3333/api";
+let allData  = [];
+let taxonomy = [];
+let filtered = [];
+let activeStage = "";
+let activeAnsFilter = "ans_all";
+let currentPage = 1;
+const PAGE_SIZE  = 50;
+
+// ── INIT ───────────────────────────────────────────────────────────────────
+async function init() {
+  try {
+    const [dRes, tRes] = await Promise.all([
+      fetch(`${API}/data`), fetch(`${API}/taxonomy`)
+    ]);
+    allData  = await dRes.json();
+    taxonomy = await tRes.json();
+
+    buildStageList();
+    applyFilters();
+    loadStats();
+  } catch(e) {
+    document.getElementById("tableArea").innerHTML =
+      `<div class="loading" style="color:#FF4D6A">❌ Cannot connect to server.<br><small>Run: node server.js</small></div>`;
+  }
+}
+
+// ── STAGE FILTER LIST ───────────────────────────────────────────────────────
+function buildStageList() {
+  const counts = {};
+  allData.forEach(r => { counts[r.stage] = (counts[r.stage]||0)+1; });
+  const sorted = Object.entries(counts).sort((a,b)=>b[1]-a[1]);
+
+  const el = document.getElementById("stageList");
+  el.innerHTML = `<div class="stage-item ${!activeStage?'active':''}" onclick="setStage('')">
+    <span>All Stages</span><span class="stage-count">${allData.length}</span></div>`;
+  sorted.forEach(([stage, count]) => {
+    el.innerHTML += `<div class="stage-item ${activeStage===stage?'active':''}" onclick="setStage('${stage}')">
+      <span style="font-size:11px">${stage}</span><span class="stage-count">${count}</span></div>`;
+  });
+}
+
+function setStage(stage) {
+  activeStage = stage;
+  buildStageList();
+  applyFilters();
+}
+
+// ── FILTER CHIPS ────────────────────────────────────────────────────────────
+function toggleChip(el, filter) {
+  activeAnsFilter = filter;
+  document.querySelectorAll('.filter-chips .chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  applyFilters();
+}
+
+function clearFilters() {
+  activeStage = "";
+  activeAnsFilter = "ans_all";
+  document.getElementById("searchInput").value = "";
+  document.getElementById("typeFilter").value  = "";
+  document.getElementById("langFilter").value  = "";
+  document.getElementById("relFilter").value   = "";
+  buildStageList();
+  applyFilters();
+}
+
+// ── APPLY FILTERS ───────────────────────────────────────────────────────────
+function applyFilters() {
+  const search   = document.getElementById("searchInput").value.toLowerCase();
+  const typeF    = document.getElementById("typeFilter").value;
+  const langF    = document.getElementById("langFilter").value;
+  const relF     = document.getElementById("relFilter").value;
+
+  filtered = allData.filter(r => {
+    if (activeStage && r.stage !== activeStage) return false;
+    if (typeF && r.qType !== typeF) return false;
+    if (langF && r.lang !== langF) return false;
+    if (relF && r.relType !== relF) return false;
+    if (activeAnsFilter === "ans_yes" && !r.hasAnswer) return false;
+    if (activeAnsFilter === "ans_no"  &&  r.hasAnswer) return false;
+    if (search) {
+      const blob = [r.id,r.taxId,r.q1,r.q3,r.a1,r.a3,r.cat,r.stage,r.hajiId].join(" ").toLowerCase();
+      if (!blob.includes(search)) return false;
+    }
+    return true;
+  });
+
+  currentPage = 1;
+  renderTable();
+  document.getElementById("showingCount").textContent = filtered.length;
+  document.getElementById("totalCount").textContent   = allData.length;
+}
+
+// ── RENDER TABLE ────────────────────────────────────────────────────────────
+function renderTable() {
+  const start  = (currentPage - 1) * PAGE_SIZE;
+  const page   = filtered.slice(start, start + PAGE_SIZE);
+
+  if (!page.length) {
+    document.getElementById("tableArea").innerHTML =
+      `<div class="loading" style="margin-top:60px">😶 No questions match your filters</div>`;
+    document.getElementById("pagination").innerHTML = "";
+    return;
+  }
+
+  let html = `<table>
+  <thead><tr>
+    <th>#</th><th>ID</th><th>Taxonomy</th><th>Date</th><th>Type</th><th>Language</th>
+    <th>Question</th><th>Answer</th><th>Stage</th><th>Category</th><th>Relation</th>
+  </tr></thead><tbody>`;
+
+  page.forEach((r, i) => {
+    const rowNum = start + i + 1;
+    const qShort = (r.q1 || r.q3 || "(audio only)").slice(0, 180);
+    const aShort = (r.a1 || r.a3 || "").slice(0, 120);
+
+    const ansBadge = r.hasAnswer
+      ? (r.a2 && !r.a1 ? `<span class="ans-badge audio">🎤 Audio</span>`
+      : r.a1 && r.a2   ? `<span class="ans-badge yes">✅ Text+Audio</span>`
+      : `<span class="ans-badge yes">✅ Text</span>`)
+      : `<span class="ans-badge no">❌ None</span>`;
+
+    const relBadge = r.relType
+      ? `<span class="rel-badge ${r.relType.toLowerCase().replace(' ','-')}">${r.relType}</span>` : "";
+
+    html += `<tr onclick="openDetail('${r.id}')" style="cursor:pointer">
+      <td class="row-num">${rowNum}</td>
+      <td><span class="vec-id">${r.id}</span></td>
+      <td><span class="tax-id">${r.taxId}</span></td>
+      <td style="font-size:11px;white-space:nowrap;color:var(--text2)">${r.date}</td>
+      <td><span class="lang-badge">${r.qType}</span></td>
+      <td><span class="lang-badge">${r.lang}</span></td>
+      <td class="q-text">
+        <div class="q-text-clip">${escHtml(qShort)}</div>
+        ${r.q2 ? `<div class="q-audio-link">🎤 ${r.q2.split(';')[0].trim()}</div>` : ''}
+      </td>
+      <td style="max-width:200px">
+        ${ansBadge}
+        ${aShort ? `<div style="font-size:11px;color:var(--text2);margin-top:4px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${escHtml(aShort)}</div>` : ''}
+      </td>
+      <td><span class="stage-tag">${r.stage}</span></td>
+      <td style="font-size:11px;color:var(--text2);max-width:180px">${escHtml(r.cat)}</td>
+      <td>${relBadge}</td>
+    </tr>`;
+  });
+
+  html += "</tbody></table>";
+  document.getElementById("tableArea").innerHTML = html;
+
+  renderPagination();
+}
+
+function renderPagination() {
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  if (totalPages <= 1) { document.getElementById("pagination").innerHTML = ""; return; }
+
+  let html = "";
+  html += `<button class="page-btn" onclick="goPage(${currentPage-1})" ${currentPage===1?'disabled':''}>‹</button>`;
+
+  for (let p = Math.max(1,currentPage-2); p <= Math.min(totalPages,currentPage+2); p++) {
+    html += `<button class="page-btn ${p===currentPage?'active':''}" onclick="goPage(${p})">${p}</button>`;
+  }
+
+  html += `<button class="page-btn" onclick="goPage(${currentPage+1})" ${currentPage===totalPages?'disabled':''}>›</button>`;
+  html += `<span class="page-info">Page ${currentPage} of ${totalPages}</span>`;
+  document.getElementById("pagination").innerHTML = html;
+}
+
+function goPage(p) {
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  if (p < 1 || p > totalPages) return;
+  currentPage = p;
+  renderTable();
+  document.getElementById("tableArea").scrollTop = 0;
+}
+
+// ── DETAIL PANEL ────────────────────────────────────────────────────────────
+function openDetail(id) {
+  const r = allData.find(x => x.id === id);
+  if (!r) return;
+
+  document.getElementById("detailTitle").textContent = id;
+  document.getElementById("detailPanel").classList.add("open");
+
+  // Highlight table row
+  document.querySelectorAll("tr").forEach(tr => tr.classList.remove("selected"));
+  const rows = document.querySelectorAll("tbody tr");
+  rows.forEach(tr => { if (tr.querySelector(".vec-id")?.textContent === id) tr.classList.add("selected"); });
+
+  const taxEntry = taxonomy.find(t => t.id === r.taxId) || {};
+
+  // Build audio players
+  const qAudioHTML = (r.q2 || "").split(";").filter(Boolean).map(af => {
+    af = af.trim();
+    return `<div class="detail-field">
+      <div class="detail-field-label">🎤 Audio: ${af}</div>
+      <div class="audio-player"><audio controls preload="none" src="/media/${af}"></audio></div>
+    </div>`;
+  }).join("");
+
+  const aAudioHTML = (r.a2 || "").split(";").filter(Boolean).map(af => {
+    af = af.trim();
+    return `<div class="detail-field">
+      <div class="detail-field-label">🎤 Sheikh Audio: ${af}</div>
+      <div class="audio-player"><audio controls preload="none" src="/media/${af}"></audio></div>
+    </div>`;
+  }).join("");
+
+  const taxOptions = taxonomy.map(t => `<option value="${t.id}" ${t.id===r.taxId?'selected':''}>${t.id} – ${t.cat}</option>`).join("");
+
+  document.getElementById("detailBody").innerHTML = `
+    <!-- META -->
+    <div class="detail-section">
+      <div class="detail-section-title">📋 Metadata</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div class="detail-field"><div class="detail-field-label">Vector ID</div><div class="detail-field-value mono">${r.id}</div></div>
+        <div class="detail-field"><div class="detail-field-label">Haji ID</div><div class="detail-field-value mono">${r.hajiId}</div></div>
+        <div class="detail-field"><div class="detail-field-label">Date</div><div class="detail-field-value">${r.date} ${r.time||""}</div></div>
+        <div class="detail-field"><div class="detail-field-label">Type</div><div class="detail-field-value">${r.qType} · ${r.lang}</div></div>
+      </div>
+    </div>
+
+    <!-- TAXONOMY -->
+    <div class="detail-section">
+      <div class="detail-section-title">🗂️ Taxonomy Classification</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+        <div class="detail-field"><div class="detail-field-label">Taxonomy ID</div><div class="detail-field-value mono">${r.taxId}</div></div>
+        <div class="detail-field"><div class="detail-field-label">Stage</div><div class="detail-field-value">${r.stage}</div></div>
+        <div class="detail-field"><div class="detail-field-label">Sub-Stage</div><div class="detail-field-value">${r.sub}</div></div>
+        <div class="detail-field"><div class="detail-field-label">Category</div><div class="detail-field-value">${r.cat}</div></div>
+      </div>
+      ${r.relType ? `<div class="detail-field"><div class="detail-field-label">Relationship</div>
+        <span class="rel-badge ${r.relType.toLowerCase().replace(' ','-')}">${r.relType}</span>
+        ${r.prevId ? `→ <span class="vec-id">${r.prevId}</span>` : ""}</div>` : ""}
+    </div>
+
+    <!-- QUESTION -->
+    <div class="detail-section">
+      <div class="detail-section-title">❓ Question</div>
+      ${r.q1 ? `<div class="detail-field"><div class="detail-field-label">Original Text</div>
+        <div class="detail-field-value">${escHtml(r.q1)}</div></div>` : ""}
+      ${qAudioHTML}
+      ${r.q3 ? `<div class="detail-field"><div class="detail-field-label">Transcript (Q)</div>
+        <div class="detail-field-value transcript">${escHtml(r.q3)}</div></div>` : ""}
+      ${r.qTransPath ? `<div class="detail-field"><div class="detail-field-label">📁 Transcript File</div>
+        <div class="detail-field-value" style="font-size:11px;color:var(--text3)">${r.qTransPath}</div></div>` : ""}
+    </div>
+
+    <!-- ANSWER -->
+    <div class="detail-section">
+      <div class="detail-section-title">✅ Sheikh's Answer</div>
+      ${r.a1 ? `<div class="detail-field"><div class="detail-field-label">Text Answer</div>
+        <div class="detail-field-value answer-text">${escHtml(r.a1)}</div></div>` : ""}
+      ${aAudioHTML}
+      ${r.a3 ? `<div class="detail-field"><div class="detail-field-label">Transcript (A)</div>
+        <div class="detail-field-value transcript">${escHtml(r.a3)}</div></div>` : ""}
+      ${!r.a1 && !r.a2 ? `<div style="color:var(--red);font-size:12px;padding:10px;background:rgba(255,77,106,0.1);border-radius:8px">❌ No answer found</div>` : ""}
+    </div>
+
+    <!-- EDIT -->
+    <div class="edit-section">
+      <div class="edit-title">✏️ Re-categorize</div>
+      <div class="edit-field">
+        <div class="edit-label">Taxonomy</div>
+        <select class="edit-input" id="editTax">${taxOptions}</select>
+      </div>
+      <div class="edit-field">
+        <div class="edit-label">Notes / Comments</div>
+        <input class="edit-input" id="editNotes" value="${escAttr(r.notes||"")}" placeholder="Add notes..."/>
+      </div>
+      <div class="edit-actions">
+        <button class="btn btn-primary" onclick="saveEdit('${r.id}')">💾 Save Changes</button>
+        <button class="btn btn-ghost" onclick="closeDetail()">Cancel</button>
+      </div>
+    </div>
+  `;
+}
+
+function closeDetail() {
+  document.getElementById("detailPanel").classList.remove("open");
+}
+
+async function saveEdit(id) {
+  const taxSel = document.getElementById("editTax");
+  const taxId  = taxSel.value;
+  const notes  = document.getElementById("editNotes").value;
+  const taxEntry = taxonomy.find(t => t.id === taxId) || {};
+
+  const res = await fetch(`${API}/update`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ vectorId: id, taxonomyId: taxId, stage: taxEntry.stage||"", sub: taxEntry.sub||"", cat: taxEntry.cat||"", notes }),
+  });
+  const data = await res.json();
+
+  if (data.ok) {
+    // Update local data
+    const idx = allData.findIndex(r => r.id === id);
+    if (idx !== -1) { allData[idx].taxId = taxId; allData[idx].stage = taxEntry.stage||""; allData[idx].sub = taxEntry.sub||""; allData[idx].cat = taxEntry.cat||""; allData[idx].notes = notes; }
+    showToast("✅ Saved!", "success");
+    applyFilters();
+    closeDetail();
+  } else {
+    showToast("❌ Save failed", "error");
+  }
+}
+
+// ── STATS & DASHBOARD ───────────────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const res  = await fetch(`${API}/stats`);
+    const stat = await res.json();
+
+    document.getElementById("headerStats").innerHTML = `
+      <div class="stat-badge blue">📋 ${stat.total} Questions</div>
+      <div class="stat-badge green">✅ ${stat.answered} Answered</div>
+      <div class="stat-badge orange">🎤 ${stat.audioAns} Audio Ans</div>
+      <div class="stat-badge red">❌ ${stat.unanswered} Unanswered</div>
+    `;
+
+    // Dashboard
+    const PALS = ["#3D8EFF","#00C97D","#F5A623","#FF4D6A","#A78BFA","#FF9B40","#00E5A0","#16A085","#E67E22","#9B59B6","#2ECC71","#3498DB"];
+    const stageEntries = Object.entries(stat.stageCounts).sort((a,b)=>b[1]-a[1]);
+    const maxStage = stageEntries[0]?.[1] || 1;
+
+    let dashHTML = `
+    <div class="dash-grid">
+      <div class="dash-card blue"><div class="dash-card-icon">📋</div><div><div class="dash-card-val">${stat.total}</div><div class="dash-card-lbl">Total Questions</div></div></div>
+      <div class="dash-card green"><div class="dash-card-icon">✅</div><div><div class="dash-card-val">${stat.answered}</div><div class="dash-card-lbl">Answered</div></div></div>
+      <div class="dash-card orange"><div class="dash-card-icon">🎤</div><div><div class="dash-card-val">${stat.audioAns}</div><div class="dash-card-lbl">Audio Answers</div></div></div>
+      <div class="dash-card red"><div class="dash-card-icon">❌</div><div><div class="dash-card-val">${stat.unanswered}</div><div class="dash-card-lbl">Unanswered</div></div></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <div class="bar-section">
+      <div class="bar-title">📂 Questions by Hajj Stage</div>
+      ${stageEntries.map(([s,c],i) => `
+        <div class="bar-item">
+          <div class="bar-label">${s}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:${Math.round(c/maxStage*100)}%;background:${PALS[i%PALS.length]}">${c}</div></div>
+          <div class="bar-count">${c}</div>
+        </div>`).join("")}
+    </div>
+
+    <div>
+    <div class="bar-section" style="margin-bottom:16px">
+      <div class="bar-title">🌐 Language Distribution</div>
+      ${Object.entries(stat.langCounts).sort((a,b)=>b[1]-a[1]).map(([l,c],i) => `
+        <div class="bar-item">
+          <div class="bar-label">${l}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:${Math.round(c/stat.total*100)}%;background:${PALS[(i+5)%PALS.length]}">${c}</div></div>
+          <div class="bar-count">${c}</div>
+        </div>`).join("")}
+    </div>
+
+    <div class="bar-section">
+      <div class="bar-title">🔗 Relationship Types</div>
+      ${Object.entries(stat.relTypes||{}).sort((a,b)=>b[1]-a[1]).map(([r,c],i) => `
+        <div class="bar-item">
+          <div class="bar-label">${r}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:${Math.round(c/stat.total*100)}%;background:${PALS[(i+8)%PALS.length]}">${c}</div></div>
+          <div class="bar-count">${c}</div>
+        </div>`).join("")}
+    </div>
+    </div>
+    </div>`;
+
+    document.getElementById("dashboardContent").innerHTML = dashHTML;
+  } catch(e) {
+    console.warn("Stats error:", e);
+  }
+}
+
+// ── EXPORT ──────────────────────────────────────────────────────────────────
+async function exportExcel() {
+  showToast("⏳ Exporting...", "");
+  const res  = await fetch(`${API}/export`, { method: "POST" });
+  const data = await res.json();
+  if (data.ok) showToast("✅ Exported: " + data.file.split("\\").pop(), "success");
+  else showToast("❌ Export failed", "error");
+}
+
+// ── TABS ─────────────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  document.querySelectorAll(".tab").forEach((t,i) => t.classList.toggle("active", (tab==="table"&&i===0)||(tab==="dashboard"&&i===1)));
+  document.getElementById("tableView").style.display      = tab==="table"     ? "flex"  : "none";
+  document.getElementById("dashboardView").style.display  = tab==="dashboard" ? "block" : "none";
+}
+
+// ── HELPERS ─────────────────────────────────────────────────────────────────
+function escHtml(s) { return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function escAttr(s) { return (s||"").replace(/"/g,"&quot;"); }
+
+function showToast(msg, type) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.className   = `toast ${type} show`;
+  setTimeout(() => el.classList.remove("show"), 3000);
+}
+
+// ── START ────────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>

@@ -1,178 +1,188 @@
 import { WASocket, WAMessage } from '@whiskeysockets/baileys';
-import { embedText } from '../../services/embeddings.service';
-import { matchFataawa } from '../../services/firestore.service';
-import { computeCompositeScore } from '../scoring';
-import { generateDraft } from '../draft';
-import { textToSpeech } from '../../services/tts.service';
-import { translateToEnglish } from '../../services/gemini.service';
+import {
+  searchFatawa,
+  savePendingQuestion,
+  savePendingAdminMsgId,
+  generateQuestionId,
+} from '../../services/fatawa-kb.service';
 import { env } from '../../config/env';
 import logger from '../../config/logger';
-import { pendingDrafts, PendingDraft, cleanExpiredDrafts } from './audio.handler';
 
-// ─── Text Message Handler ─────────────────────────────────────────────────────
+// ─── Text Message Handler — Fatawa Semantic Search ───────────────────────────
+//
+// Flow:
+//   1. User asks in any language (Urdu / Roman Urdu / English)
+//   2. Gemini embedding → semantic search over _fatawa_kb
+//   3. High confidence (≥0.72)  → send audio preview + transcript to admin group
+//      Low confidence / no match → send question to admin group for manual reply
+//   4. Admin says "thik hai" (or quotes the message) → approval.handler.ts
+//      sends the matched Sheikh audio file to public group, quoting user's message
+//
+// ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Handles incoming TEXT messages from the public group.
- *
- * Accepts questions in:
- *   - Urdu script (Arabic)
- *   - Roman Urdu (Latin transliteration)
- *   - English
- *   - Hindi / mixed language
- *
- * Pipeline:
- *   Text → (translate to English if needed) → Embed → Supabase/Firestore
- *   similarity search → Composite scoring → Gemini draft → TTS → Admin
- *   group submission (same approval flow as audio)
- */
+const HIGH_CONFIDENCE = 0.72;
+
 export async function handleTextMessage(
   sock: WASocket,
   msg: WAMessage,
 ): Promise<void> {
-  cleanExpiredDrafts();
-
-  const msgId   = msg.key.id ?? 'unknown';
-  const senderJid = msg.key.participant ?? msg.key.remoteJid ?? '';
+  const msgId        = msg.key.id ?? 'unknown';
+  const senderJid    = msg.key.participant ?? msg.key.remoteJid ?? '';
   const publicGroupJid = msg.key.remoteJid ?? '';
 
-  // Extract text from both plain and extended text messages
+  // Extract text
   const rawText =
     msg.message?.conversation ||
     msg.message?.extendedTextMessage?.text ||
     '';
 
-  if (!rawText || rawText.trim().length < 3) {
-    logger.debug({ msgId }, 'Text too short — skipping');
-    return;
-  }
+  if (!rawText || rawText.trim().length < 5) return;
 
-  // Ignore messages that look like commands or greetings (< 5 chars or
-  // pure emoji / punctuation) to avoid noisy responses
+  // Skip very short non-question content (emoji, greetings < 8 chars)
   const textOnly = rawText.replace(/[^\p{L}\p{N}\s]/gu, '').trim();
-  if (textOnly.length < 5) {
-    logger.debug({ msgId, rawText }, 'Text is too short after stripping — skipping');
+  if (textOnly.length < 8) {
+    logger.debug({ msgId, rawText }, 'Text too short after stripping — skipping');
     return;
   }
 
-  logger.info({ msgId, senderJid, rawText }, '💬 Received text message from public group');
+  const senderName = msg.pushName ?? senderJid.split('@')[0];
 
-  // ── 1. Translate to English for vector search ───────────────────────────────
-  let searchText: string;
+  logger.info({ msgId, senderJid, rawText }, '💬 Text question received from public group');
+
+  // ── 1. Semantic search in fatawa KB ─────────────────────────────────────────
+  let matches: Awaited<ReturnType<typeof searchFatawa>> = [];
   try {
-    searchText = await translateToEnglish(rawText);
-    logger.info({ searchText, msgId }, 'Search text ready (translated/passed-through)');
+    matches = await searchFatawa(rawText, { topN: 3, threshold: 0.50 });
   } catch (err) {
-    logger.warn({ err, msgId }, 'Translation failed — using raw text for search');
-    searchText = rawText;
+    logger.error({ err, msgId }, 'Fatawa search failed — falling back to manual');
+    matches = [];
   }
 
-  // ── 2–6. Embed → Match → Score → Draft (with graceful fallback) ─────────────
-  let draft: Awaited<ReturnType<typeof generateDraft>>;
-  let scoring: ReturnType<typeof computeCompositeScore>;
+  const adminGroupJid = env.ADMIN_GROUP_JID;
+  const topMatch = matches[0];
 
-  try {
-    // ── 2. Generate embedding ──────────────────────────────────────────────────
-    const embedding = await embedText(searchText);
+  // ── 2a. HIGH CONFIDENCE — suggest specific audio answer ─────────────────────
+  if (topMatch && topMatch.score >= HIGH_CONFIDENCE && topMatch.record.audioFileName) {
+    const rec   = topMatch.record;
+    const score = topMatch.score;
+    const qId   = generateQuestionId();
 
-    // ── 3. Query Firestore for similar historical answers ─────────────────────
-    const matches = await matchFataawa(embedding);
-    logger.info({ matchCount: matches.length, msgId }, 'Database matches retrieved');
+    const confidencePct = Math.round(score * 100);
+    const transcriptPreview = (rec.answerTranscript || rec.answerText || '').slice(0, 200);
 
-    // ── 4. Compute composite score ────────────────────────────────────────────
-    scoring = computeCompositeScore(matches);
+    // Save pending state in Firestore
+    await savePendingQuestion({
+      questionId:           qId,
+      publicGroupJid,
+      quotedMessageId:      msgId,
+      senderJid,
+      senderName,
+      questionText:         rawText,
+      suggestedAudioFile:   `gs://${env.GCS_BUCKET_NAME}/${rec.audioFileName}`,
+      suggestedAudioFileName: rec.audioFileName,
+      suggestedTranscript:  rec.answerTranscript || rec.answerText || '',
+      confidence:           score,
+      status:               'pending',
+    });
+
+    // Notify admin group
+    const adminNotice =
+      `🎤 *FATAWA MATCH FOUND*\n\n` +
+      `*❓ Question (public group):*\n"${rawText}"\n` +
+      `👤 _${senderName}_\n\n` +
+      `*🎙️ Suggested Audio:* \`${rec.audioFileName}\`\n` +
+      `*📊 Confidence:* ${confidencePct}%\n` +
+      `*📂 Topic:* ${rec.topic || 'General'}\n\n` +
+      `*📝 Transcript preview:*\n${transcriptPreview}${transcriptPreview.length >= 200 ? '…' : ''}\n\n` +
+      `✅ Reply *thik hai* to send this audio to the pilgrim\n` +
+      `❌ Reply *nahi* to skip (you can then send your own voice)\n` +
+      `🆔 _ref: ${qId}_`;
+
+    const sentMsg = await sock.sendMessage(adminGroupJid, { text: adminNotice });
+    const adminMsgId = sentMsg?.key.id;
+    if (adminMsgId) {
+      await savePendingAdminMsgId(qId, adminMsgId);
+    }
+
     logger.info(
-      { compositeScore: scoring.compositeScore.toFixed(3), tier: scoring.tier },
-      'Composite score computed',
+      { qId, audioFile: rec.audioFileName, confidence: confidencePct, adminMsgId },
+      '✅ High-confidence match sent to admin group for approval',
     );
-
-    // ── 5. Generate draft ─────────────────────────────────────────────────────
-    draft = await generateDraft(rawText, scoring);
-
-  } catch (err) {
-    // Firestore not set up yet, or embedding failed — send text to admin for manual review
-    logger.warn({ err, msgId }, 'Pipeline error (embedding/DB) — falling back to manual review');
-    await sock.sendMessage(env.ADMIN_GROUP_JID, {
-      text:
-        `💬 *NEW TEXT QUESTION (Public Group)*\n\n` +
-        `"${rawText}"\n\n` +
-        `_Please reply with your answer — it will be forwarded to the pilgrim._`,
-    });
     return;
   }
 
-  // ── 6. Route based on draft type ────────────────────────────────────────────
-  if (draft.type === 'FLAG_FOR_MANUAL_REVIEW') {
-    logger.info({ msgId }, 'Sending FLAG_FOR_MANUAL_REVIEW to admin group');
-    await sock.sendMessage(env.ADMIN_GROUP_JID, {
-      text:
-        `🚩 *FLAG FOR MANUAL REVIEW (Text Question)*\n\n` +
-        `*Question:*\n"${rawText}"\n\n` +
-        `*Composite Score:* ${scoring!.compositeScore.toFixed(3)} (below 0.60 threshold)\n` +
-        `_This question could not be matched confidently. Shaikh's direct response is required._`,
+  // ── 2b. MEDIUM CONFIDENCE — mention best match but ask Shaikh ───────────────
+  if (topMatch && topMatch.score >= 0.55 && topMatch.record.audioFileName) {
+    const rec   = topMatch.record;
+    const qId   = generateQuestionId();
+    const confidencePct = Math.round(topMatch.score * 100);
+    const transcriptPreview = (rec.answerTranscript || rec.answerText || '').slice(0, 150);
+
+    await savePendingQuestion({
+      questionId:           qId,
+      publicGroupJid,
+      quotedMessageId:      msgId,
+      senderJid,
+      senderName,
+      questionText:         rawText,
+      suggestedAudioFile:   `gs://${env.GCS_BUCKET_NAME}/${rec.audioFileName}`,
+      suggestedAudioFileName: rec.audioFileName,
+      suggestedTranscript:  rec.answerTranscript || rec.answerText || '',
+      confidence:           topMatch.score,
+      status:               'pending',
     });
+
+    const adminNotice =
+      `⚠️ *POSSIBLE MATCH (${confidencePct}% confidence)*\n\n` +
+      `*❓ Question:*\n"${rawText}"\n` +
+      `👤 _${senderName}_\n\n` +
+      `*🎙️ Closest audio:* \`${rec.audioFileName}\`\n` +
+      `*📂 Topic:* ${rec.topic || 'General'}\n\n` +
+      `*📝 Preview:*\n${transcriptPreview}${transcriptPreview.length >= 150 ? '…' : ''}\n\n` +
+      `✅ *thik hai* → send this audio to pilgrim\n` +
+      `🎤 Or record your own voice answer\n` +
+      `❌ *nahi* → discard\n` +
+      `🆔 _ref: ${qId}_`;
+
+    const sentMsg = await sock.sendMessage(adminGroupJid, { text: adminNotice });
+    const adminMsgId = sentMsg?.key.id;
+    if (adminMsgId) await savePendingAdminMsgId(qId, adminMsgId);
+
+    logger.info(
+      { qId, audioFile: rec.audioFileName, confidence: confidencePct },
+      '⚠️ Medium-confidence match sent to admin for review',
+    );
     return;
   }
 
-  // ── 7. Cache pending draft ──────────────────────────────────────────────────
-  const draftCacheKey = `draft_${msgId}`;
-  const pendingEntry: PendingDraft = {
-    draftText: draft.text,
-    draftType: draft.type,
-    compositeScore: draft.compositeScore,
-    originalQuestion: rawText,
-    userJid: senderJid,
+  // ── 2c. NO MATCH — ask Shaikh to answer manually ────────────────────────────
+  const qId = generateQuestionId();
+  await savePendingQuestion({
+    questionId:             qId,
     publicGroupJid,
-    publicMsgId: msg.key.id ?? undefined,
-    timestamp: Date.now(),
-  };
-  pendingDrafts.set(draftCacheKey, pendingEntry);
-  logger.info({ draftCacheKey }, 'Text draft cached');
-
-  // ── 8. Convert draft text → TTS audio ──────────────────────────────────────
-  let ttsBuffer: Buffer;
-  try {
-    ttsBuffer = await textToSpeech(draft.text);
-    logger.debug({ bytes: ttsBuffer.length }, 'TTS audio generated');
-  } catch (err) {
-    logger.error({ err, msgId }, 'TTS failed — sending text fallback to admin');
-    await sock.sendMessage(env.ADMIN_GROUP_JID, {
-      text:
-        `📝 *DRAFT ANSWER (Text Question) — AWAITING APPROVAL*\n\n` +
-        `*Pilgrim asked:* "${rawText}"\n\n` +
-        `*Suggested answer:*\n${draft.text}\n\n` +
-        `✅ Reply *thik hai* or *approve* to send.\n` +
-        `❌ Reply *nahi* or *reject* to discard.\n` +
-        `🎤 Or record your own voice — it will be forwarded directly.`,
-    });
-    return;
-  }
-
-  // ── 9. Send TTS audio to admin group with approval prompt ───────────────────
-  const tierLabel =
-    draft.type === 'DIRECT'
-      ? '✅ HIGH CONFIDENCE'
-      : '⚠️ MEDIUM CONFIDENCE';
-
-  const approvalCaption =
-    `💬 *TEXT Q — ${tierLabel}*\n` +
-    `*Q:* "${rawText}"\n\n` +
-    `Reply *thik hai* to send, *nahi* to reject, or record your own voice answer.`;
-
-  const sentMsg = await sock.sendMessage(env.ADMIN_GROUP_JID, {
-    audio: ttsBuffer,
-    mimetype: 'audio/ogg; codecs=opus',
-    ptt: false,
-    caption: approvalCaption,
+    quotedMessageId:        msgId,
+    senderJid,
+    senderName,
+    questionText:           rawText,
+    suggestedAudioFile:     '',
+    suggestedAudioFileName: '',
+    suggestedTranscript:    '',
+    confidence:             0,
+    status:                 'pending',
   });
 
-  // Update cache with real admin message ID
+  const adminNotice =
+    `🆕 *NEW QUESTION — NO MATCH IN DATABASE*\n\n` +
+    `*❓ Question:*\n"${rawText}"\n` +
+    `👤 _${senderName}_\n\n` +
+    `_No historical audio fatwa found for this question._\n\n` +
+    `🎤 Please record a voice answer — it will be forwarded to the pilgrim automatically.\n` +
+    `📝 Or reply with a text answer.\n` +
+    `🆔 _ref: ${qId}_`;
+
+  const sentMsg = await sock.sendMessage(adminGroupJid, { text: adminNotice });
   const adminMsgId = sentMsg?.key.id;
-  if (adminMsgId) {
-    const existing = pendingDrafts.get(draftCacheKey);
-    if (existing) {
-      pendingDrafts.delete(draftCacheKey);
-      pendingDrafts.set(adminMsgId, existing);
-      logger.info({ adminMsgId }, 'Text draft cache updated with admin message ID');
-    }
-  }
+  if (adminMsgId) await savePendingAdminMsgId(qId, adminMsgId);
+
+  logger.info({ qId, msgId }, '🆕 No match — question forwarded to admin for manual answer');
 }

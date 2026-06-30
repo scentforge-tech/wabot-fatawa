@@ -9,6 +9,9 @@ const envSchema = z.object({
   FIREBASE_PROJECT_ID: z.string().min(1, 'FIREBASE_PROJECT_ID is required'),
   FIREBASE_SERVICE_ACCOUNT_PATH: z.string().default('./firebase-service-account.json'),
 
+  // Cloud Storage — Sheikh audio files (fatawa knowledge base)
+  GCS_BUCKET_NAME: z.string().default('wabot-fatawa-audio'),
+
   // WhatsApp Groups (leave blank on first run — fill after QR scan)
   ADMIN_GROUP_JID: z.string().default(''),
   PUBLIC_GROUP_JID: z.string().default(''),
