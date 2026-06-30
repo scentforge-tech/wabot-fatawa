@@ -8,10 +8,19 @@ steps:
       - '-c'
       - |
         mkdir -p auth_info_baileys
-        gsutil -m cp "gs://masjidmap-5yvj5-wabot-auth/auth/*" auth_info_baileys/ \
-          && echo "Auth restored: $(ls auth_info_baileys/ | wc -l) files" \
-          && ls auth_info_baileys/ \
-          || echo "WARNING: GCS copy failed - no auth in image"
+        # Placeholder ensures dir is NEVER empty — Docker excludes empty dirs from
+        # the build context, which makes COPY fail with "file does not exist"
+        touch auth_info_baileys/.gitkeep
+
+        echo "Listing GCS bucket..."
+        gsutil ls gs://masjidmap-5yvj5-wabot-auth/auth/ 2>&1 | head -5 || echo "ls failed"
+
+        echo "Downloading auth files..."
+        if gsutil -m cp "gs://masjidmap-5yvj5-wabot-auth/auth/*" auth_info_baileys/; then
+          echo "Auth restored: $(ls auth_info_baileys/ | grep -v .gitkeep | wc -l) files"
+        else
+          echo "GCS download failed - bot will show QR page on startup"
+        fi
 
   # Build the Docker image
   - name: 'gcr.io/cloud-builders/docker'
