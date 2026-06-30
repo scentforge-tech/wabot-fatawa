@@ -10,6 +10,7 @@ import {
   downloadAudioFile,
 } from '../../services/fatawa-kb.service';
 import { transcribeAudio } from '../../services/whisper.service';
+import { getGroupSettings } from '../../services/settings.service';
 import { env } from '../../config/env';
 import logger from '../../config/logger';
 
@@ -86,6 +87,10 @@ export async function handleApprovalMessage(
     (msgType === 'documentMessage' &&
       (msg.message?.documentMessage?.mimetype ?? '').startsWith('audio/'));
 
+  // Get live JIDs from settings (set from dashboard, stored in Firestore)
+  const { adminGroupJid } = getGroupSettings();
+  const adminJid = adminGroupJid || env.ADMIN_GROUP_JID;
+
   // ── CASE A: Voice note ────────────────────────────────────────────────────
   if (isAudio) {
     let audioBuffer: Buffer;
@@ -96,7 +101,7 @@ export async function handleApprovalMessage(
       )) as Buffer;
     } catch (err) {
       logger.error({ err, msgId }, 'Failed to download admin voice note');
-      await sock.sendMessage(env.ADMIN_GROUP_JID, { text: '⚠️ Failed to download voice note. Please resend.' });
+      await sock.sendMessage(adminJid || env.ADMIN_GROUP_JID, { text: '⚠️ Failed to download voice note. Please resend.' });
       return;
     }
 
@@ -173,11 +178,13 @@ async function dispatchPendingAudio(
   msg: WAMessage,
   approvalText: string,
 ): Promise<void> {
+  const { adminGroupJid: aJid, publicGroupJid: pJid } = getGroupSettings();
+  const adminJid = aJid || env.ADMIN_GROUP_JID;
 
   const pending = await findPendingForMsg(msg);
 
   if (!pending) {
-    await sock.sendMessage(env.ADMIN_GROUP_JID, {
+    await sock.sendMessage(adminJid, {
       text:
         `✅ Approval received but no pending question found.\n\n` +
         `_To send an answer: record a voice note — it will be forwarded automatically._`,
@@ -185,7 +192,7 @@ async function dispatchPendingAudio(
     return;
   }
 
-  const publicGroupJid = pending.publicGroupJid || env.PUBLIC_GROUP_JID;
+  const publicGroupJid = pending.publicGroupJid || pJid || env.PUBLIC_GROUP_JID;
 
   // If there's a suggested audio file → download from GCS and send
   if (pending.suggestedAudioFileName) {
@@ -194,7 +201,7 @@ async function dispatchPendingAudio(
       audioBuffer = await downloadAudioFile(pending.suggestedAudioFileName);
     } catch (err) {
       logger.error({ err, file: pending.suggestedAudioFileName }, 'GCS download failed');
-      await sock.sendMessage(env.ADMIN_GROUP_JID, {
+      await sock.sendMessage(adminJid, {
         text: `❌ Failed to download audio file \`${pending.suggestedAudioFileName}\` from GCS.\n\nError: ${String(err)}`,
       });
       return;

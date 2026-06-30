@@ -5,6 +5,7 @@ import {
   savePendingAdminMsgId,
   generateQuestionId,
 } from '../../services/fatawa-kb.service';
+import { getGroupSettings } from '../../services/settings.service';
 import { env } from '../../config/env';
 import logger from '../../config/logger';
 
@@ -47,6 +48,15 @@ export async function handleTextMessage(
 
   const senderName = msg.pushName ?? senderJid.split('@')[0];
 
+  // Get live group settings (stored in Firestore, set from dashboard)
+  const settings = getGroupSettings();
+  const adminGroupJid = settings.adminGroupJid || env.ADMIN_GROUP_JID;
+
+  if (!adminGroupJid) {
+    logger.error({ msgId }, 'No admin group configured — cannot forward question. Set it in the dashboard.');
+    return;
+  }
+
   logger.info({ msgId, senderJid, rawText }, '💬 Text question received from public group');
 
   // ── 1. Semantic search in fatawa KB ─────────────────────────────────────────
@@ -58,7 +68,6 @@ export async function handleTextMessage(
     matches = [];
   }
 
-  const adminGroupJid = env.ADMIN_GROUP_JID;
   const topMatch = matches[0];
 
   // ── 2a. HIGH CONFIDENCE — suggest specific audio answer ─────────────────────
