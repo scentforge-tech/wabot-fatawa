@@ -31,9 +31,8 @@ steps:
       - '--max-instances=1'
       - '--timeout=3600'
       - '--port=8080'
-      - '--set-env-vars=NODE_ENV=production,GCS_AUTH_BUCKET=masjidmap-5yvj5-wabot-auth'
-      - '--set-secrets=GEMINI_API_KEY=GEMINI_API_KEY:latest,FIREBASE_PROJECT_ID=FIREBASE_PROJECT_ID:latest,ADMIN_GROUP_JID=ADMIN_GROUP_JID:latest,PUBLIC_GROUP_JID=PUBLIC_GROUP_JID:latest,FIREBASE_SERVICE_ACCOUNT_JSON=FIREBASE_SERVICE_ACCOUNT_JSON:latest'
-      - '--service-account=firebase-adminsdk-fbsvc@masjidmap-5yvj5.iam.gserviceaccount.com'
+      - '--set-env-vars=NODE_ENV=production'
+      - '--set-secrets=GEMINI_API_KEY=GEMINI_API_KEY:latest,FIREBASE_PROJECT_ID=FIREBASE_PROJECT_ID:latest,ADMIN_GROUP_JID=ADMIN_GROUP_JID:latest,PUBLIC_GROUP_JID=PUBLIC_GROUP_JID:latest'
 
 images:
   - 'gcr.io/$PROJECT_ID/wabot-fatawa'
