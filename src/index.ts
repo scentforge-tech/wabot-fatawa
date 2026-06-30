@@ -155,6 +155,15 @@ input[type=tel]::placeholder{color:#444;}
       <p class="code-label">Enter this code in WhatsApp → Linked Devices → Link with phone number</p>
       <p style="color:#f59e0b;font-size:.78rem;margin-top:8px">⏱ Code expires in ~60 seconds</p>
     </div>
+
+    <div style="margin-top:24px;padding-top:20px;border-top:1px solid #1a2e22;text-align:center">
+      <p style="color:#555;font-size:.8rem;margin-bottom:10px">Entered wrong code or stuck? Reset the session:</p>
+      <button class="btn" id="reset-btn" onclick="resetAuth()"
+        style="background:#1a1a1a;color:#f87171;border:1px solid #5b1c1c;font-size:.85rem;padding:9px">
+        🔄 Reset &amp; Start Fresh
+      </button>
+      <div class="msg" id="reset-msg" style="margin-top:10px"></div>
+    </div>
   </div>
 </div>
 
@@ -211,6 +220,29 @@ function showMsg(text, type) {
   el.textContent = text;
   el.className = 'msg ' + type;
   el.style.display = text ? 'block' : 'none';
+}
+
+async function resetAuth() {
+  const btn = document.getElementById('reset-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Resetting…';
+  const msgEl = document.getElementById('reset-msg');
+  msgEl.textContent = '';
+  msgEl.style.display = 'none';
+  try {
+    const resp = await fetch('/reset-auth', { method: 'POST' });
+    const data = await resp.json();
+    msgEl.textContent = '✅ Reset done! Page will reload in 4s to show new QR/pairing…';
+    msgEl.className = 'msg info';
+    msgEl.style.display = 'block';
+    setTimeout(() => location.reload(), 4000);
+  } catch(e) {
+    msgEl.textContent = '❌ Reset failed: ' + (e.message || 'network error');
+    msgEl.className = 'msg error';
+    msgEl.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = '🔄 Reset & Start Fresh';
+  }
 }
 </script>
 </body></html>`;
@@ -277,6 +309,19 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ── POST /reset-auth — wipe auth_info_baileys and reconnect fresh ──────────────────
+  if (url === '/reset-auth' && method === 'POST') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, message: 'Auth reset initiated — reconnecting...' }));
+    // Reset after response is sent so client gets the reply
+    setImmediate(() => {
+      resetAuthAndRestart().catch((err) =>
+        logger.error({ err }, 'Error during auth reset'),
+      );
+    });
+    return;
+  }
+
   // ── Default — HTML status page ─────────────────────────────────────────────
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
   if (botConnected) {
@@ -295,7 +340,7 @@ server.listen(PORT, '0.0.0.0', () => {
 // ─── Bot init (after server is bound) ─────────────────────────────────────────
 import 'dotenv/config';
 import * as qrcode from 'qrcode-terminal';
-import { startBot, setQrCallback, setConnectionCallback, requestPairingCodeForPhone } from './bot/connection';
+import { startBot, setQrCallback, setConnectionCallback, requestPairingCodeForPhone, resetAuthAndRestart } from './bot/connection';
 import logger from './config/logger';
 
 setQrCallback((qr: string) => {

@@ -60,6 +60,30 @@ export async function requestPairingCodeForPhone(phoneNumber: string): Promise<s
   return code;
 }
 
+/**
+ * Wipe saved credentials and restart the bot with a clean session.
+ * Use when a wrong pairing code was entered or auth is in a bad state.
+ */
+export async function resetAuthAndRestart(): Promise<void> {
+  logger.warn('🔄 Resetting auth — wiping auth_info_baileys/ and restarting...');
+
+  // Close current socket cleanly
+  if (sock) {
+    try { sock.end(undefined); } catch { /* ignore */ }
+    sock = null;
+  }
+
+  // Delete all files inside auth_info_baileys/ but keep the directory
+  if (fs.existsSync(env.AUTH_DIR)) {
+    for (const file of fs.readdirSync(env.AUTH_DIR)) {
+      fs.rmSync(`${env.AUTH_DIR}/${file}`, { recursive: true, force: true });
+    }
+  }
+
+  reconnectAttempts = 0;
+  logger.info('🔄 Auth cleared — restarting bot connection...');
+  await startBot();
+}
 
 // When ADMIN_GROUP_JID or PUBLIC_GROUP_JID are not set, the bot logs every
 // incoming group JID so you can identify your groups. Post any message in each
