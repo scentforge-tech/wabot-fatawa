@@ -16,7 +16,7 @@ import logger from '../config/logger';
 import { handleAudioMessage } from './handlers/audio.handler';
 import { handleTextMessage } from './handlers/text.handler';
 import { handleApprovalMessage } from './handlers/approval.handler';
-import { downloadAuthFromGCS, uploadFileToGCS } from './auth-gcs';
+import { downloadAuthFromFirestore, uploadFileToFirestore } from './auth-firestore';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -140,12 +140,12 @@ export async function startBot(): Promise<void> {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   }
 
-  // Restore auth from GCS if the local directory is empty (Cloud Run restarts)
+  // Restore auth from Firestore if the local directory is empty (Cloud Run restarts)
   const hasLocalAuth = fs.existsSync(env.AUTH_DIR) &&
     fs.readdirSync(env.AUTH_DIR).length > 0;
   if (!hasLocalAuth) {
-    logger.info('No local auth found — attempting GCS restore...');
-    await downloadAuthFromGCS(env.AUTH_DIR);
+    logger.info('No local auth found — attempting Firestore restore...');
+    await downloadAuthFromFirestore(env.AUTH_DIR);
   }
 
   const { state, saveCreds } = await useMultiFileAuthState(env.AUTH_DIR);
@@ -180,21 +180,19 @@ export async function startBot(): Promise<void> {
     generateHighQualityLinkPreview: false,
   });
 
-  // ── Credentials persistence — save locally AND sync to GCS ─────────────────
+  // ── Credentials persistence — save locally AND sync to Firestore ───────────
   sock.ev.on('creds.update', async () => {
     await saveCreds();
-    // Upload any changed files to GCS so Cloud Run survives restarts
-    if (process.env.GCS_AUTH_BUCKET) {
-      try {
-        const files = fs.readdirSync(env.AUTH_DIR).filter((f) =>
-          fs.statSync(path.join(env.AUTH_DIR, f)).isFile(),
-        );
-        await Promise.all(files.map((f) =>
-          uploadFileToGCS(path.join(env.AUTH_DIR, f), f),
-        ));
-      } catch (e) {
-        logger.warn({ e }, 'GCS creds sync error (non-fatal)');
-      }
+    // Sync changed files to Firestore so Cloud Run survives restarts
+    try {
+      const files = fs.readdirSync(env.AUTH_DIR).filter((f) =>
+        fs.statSync(path.join(env.AUTH_DIR, f)).isFile(),
+      );
+      await Promise.all(files.map((f) =>
+        uploadFileToFirestore(path.join(env.AUTH_DIR, f), f),
+      ));
+    } catch (e) {
+      logger.warn({ e }, 'Firestore creds sync error (non-fatal)');
     }
   });
 
