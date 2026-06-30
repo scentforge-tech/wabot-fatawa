@@ -172,8 +172,12 @@ export async function startBot(): Promise<void> {
   const hasLocalAuth = fs.existsSync(env.AUTH_DIR) &&
     fs.readdirSync(env.AUTH_DIR).length > 0;
   if (!hasLocalAuth) {
-    logger.info('No local auth found — attempting Firestore restore...');
-    await downloadAuthFromFirestore(env.AUTH_DIR);
+    if (process.env.SKIP_FIRESTORE_RESTORE === 'true') {
+      logger.info('SKIP_FIRESTORE_RESTORE=true — showing QR for fresh local session');
+    } else {
+      logger.info('No local auth found — attempting Firestore restore...');
+      await downloadAuthFromFirestore(env.AUTH_DIR);
+    }
   }
 
   const { state, saveCreds } = await useMultiFileAuthState(env.AUTH_DIR);
@@ -211,6 +215,8 @@ export async function startBot(): Promise<void> {
   // ── Credentials persistence — save locally AND sync to Firestore ───────────
   sock.ev.on('creds.update', async () => {
     await saveCreds();
+    // Skip Firestore upload in local dev to avoid overwriting production credentials
+    if (process.env.SKIP_FIRESTORE_RESTORE === 'true') return;
     // Sync changed files to Firestore so Cloud Run survives restarts
     try {
       const files = fs.readdirSync(env.AUTH_DIR).filter((f) =>
