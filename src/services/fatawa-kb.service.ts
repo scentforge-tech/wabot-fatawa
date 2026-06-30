@@ -9,14 +9,17 @@
 
 import { Firestore, Timestamp } from '@google-cloud/firestore';
 import { Storage } from '@google-cloud/storage';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { env } from '../config/env';
 import logger from '../config/logger';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 
-// ─── Firestore + GCS clients (reuse from firebase-admin if initialized) ────────
+// ─── Embedding (gemini-embedding-001 via REST — same as embeddings.service.ts) ─
+const EMBEDDING_MODEL = 'gemini-embedding-001';
+const GEMINI_BASE    = 'https://generativelanguage.googleapis.com/v1beta';
+
+// ─── Firestore + GCS clients ───────────────────────────────────────────────────
 let _db: Firestore;
 let _storage: Storage;
 
@@ -52,26 +55,29 @@ function getStorage(): Storage {
   return _storage;
 }
 
-// ─── Gemini embedding ──────────────────────────────────────────────────────────
-
-let _genai: GoogleGenerativeAI | null = null;
-
-function getGenAI(): GoogleGenerativeAI {
-  if (!_genai) {
-    _genai = new GoogleGenerativeAI(env.GEMINI_API_KEY);
-  }
-  return _genai;
-}
+// ─── Gemini embedding via REST ────────────────────────────────────────────────
 
 /**
- * Generate Gemini embedding for a text string.
- * Uses text-embedding-004 (supports multilingual + Urdu/Roman Urdu well)
+ * Generate a 768-dim embedding vector via gemini-embedding-001 REST API.
+ * Uses the same approach as src/services/embeddings.service.ts
  */
 export async function embedQuestion(text: string): Promise<number[]> {
-  const genai = getGenAI();
-  const model = genai.getGenerativeModel({ model: 'text-embedding-004' });
-  const result = await model.embedContent(text);
-  return result.embedding.values;
+  const url = `${GEMINI_BASE}/models/${EMBEDDING_MODEL}:embedContent?key=${env.GEMINI_API_KEY}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: `models/${EMBEDDING_MODEL}`,
+      content: { parts: [{ text: text.trim().slice(0, 2000) }] },
+      outputDimensionality: 768,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Gemini embed error ${res.status}: ${err}`);
+  }
+  const json = await res.json() as { embedding: { values: number[] } };
+  return json.embedding.values;
 }
 
 // ─── Types ─────────────────────────────────────────────────────────────────────

@@ -17,8 +17,7 @@
 
 import { Firestore } from '@google-cloud/firestore';
 import { Storage }   from '@google-cloud/storage';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { readFileSync, existsSync, readdirSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -31,7 +30,8 @@ const PROJECT_ID   = process.env.FIREBASE_PROJECT_ID;
 const SA_PATH      = process.env.FIREBASE_SERVICE_ACCOUNT_PATH ?? './firebase-service-account.json';
 const GEMINI_KEY   = process.env.GEMINI_API_KEY;
 const BUCKET_NAME  = process.env.GCS_BUCKET_NAME ?? 'wabot-fatawa-audio';
-const BATCH_DELAY  = 1200;  // ms between Gemini embedding calls (rate limit)
+const EMBEDDING_MODEL = 'gemini-embedding-001';
+const GEMINI_BASE     = 'https://generativelanguage.googleapis.com/v1beta';
 
 if (!PROJECT_ID || !GEMINI_KEY) {
   console.error('❌  FIREBASE_PROJECT_ID and GEMINI_API_KEY must be set in .env');
@@ -51,8 +51,7 @@ const storage = new Storage({
   credentials: { client_email: sa.client_email, private_key: sa.private_key },
 });
 
-const genai = new GoogleGenerativeAI(GEMINI_KEY);
-const embeddingModel = genai.getGenerativeModel({ model: 'text-embedding-004' });
+const BATCH_DELAY = 600; // ms between embedding calls
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -61,8 +60,22 @@ function sleep(ms) {
 }
 
 async function embedText(text) {
-  const result = await embeddingModel.embedContent(text.slice(0, 2000));
-  return result.embedding.values;
+  const url = `${GEMINI_BASE}/models/${EMBEDDING_MODEL}:embedContent?key=${GEMINI_KEY}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: `models/${EMBEDDING_MODEL}`,
+      content: { parts: [{ text: text.trim().slice(0, 2000) }] },
+      outputDimensionality: 768,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Gemini embed error ${res.status}: ${err}`);
+  }
+  const json = await res.json();
+  return json.embedding.values;
 }
 
 /** Read transcript file (from OUTPUT/transcripts/) for an audio file */
