@@ -3,6 +3,7 @@ import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
+  Browsers,
   WASocket,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
@@ -160,14 +161,9 @@ export async function startBot(): Promise<void> {
       keys: makeCacheableSignalKeyStore(state.keys, baileysLogger),
     },
     logger: baileysLogger,
-    // Browser identity — use Chrome to avoid being flagged by WA
-    browser: ['Fatawa Bot', 'Chrome', '120.0.0'],
-    // Keep the WebSocket alive with pings every 10s
-    keepAliveIntervalMs: 10_000,
-    // Fail fast on connect so we can retry cleanly
-    connectTimeoutMs: 30_000,
-    // Timeout for individual queries
-    defaultQueryTimeoutMs: 20_000,
+    // Use Baileys' standard Ubuntu/Chrome browser fingerprint
+    // — custom identifiers cause WhatsApp to reject the connection
+    browser: Browsers.ubuntu('Chrome'),
     printQRInTerminal: false,
     syncFullHistory: false,
     markOnlineOnConnect: false,
