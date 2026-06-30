@@ -30,7 +30,7 @@ export function setConnectionCallback(cb: (connected: boolean) => void): void { 
 
 /**
  * Request a pairing code for phone-number-based linking.
- * Call AFTER startBot() — waits for the WebSocket to be open first.
+ * Call AFTER startBot() — waits for the WebSocket to be stable first.
  * Returns the 8-character code the user types in WhatsApp.
  */
 export async function requestPairingCodeForPhone(phoneNumber: string): Promise<string> {
@@ -47,8 +47,8 @@ export async function requestPairingCodeForPhone(phoneNumber: string): Promise<s
     throw new Error('Device is already linked — no pairing code needed');
   }
 
-  // Wait for the WebSocket to be open (with 15s timeout)
-  const timeoutMs = 15_000;
+  // Wait for the WebSocket to be open (with 20s timeout)
+  const timeoutMs = 20_000;
   await Promise.race([
     sock.waitForSocketOpen(),
     new Promise<never>((_, reject) =>
@@ -56,8 +56,28 @@ export async function requestPairingCodeForPhone(phoneNumber: string): Promise<s
     ),
   ]);
 
-  const code = await sock.requestPairingCode(cleaned);
-  return code;
+  // Small stabilisation delay — ensures the WS handshake is fully settled
+  await new Promise((r) => setTimeout(r, 2000));
+
+  // Re-check socket wasn't replaced during the delay (e.g. by resetAuthAndRestart)
+  if (!sock) throw new Error('Bot restarted unexpectedly — please try again');
+
+  // Attempt with one retry on transient errors
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const code = await sock.requestPairingCode(cleaned);
+      logger.info({ cleaned, attempt }, 'Pairing code issued successfully');
+      return code;
+    } catch (err) {
+      logger.warn({ err, attempt }, 'requestPairingCode failed');
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 3000));
+      } else {
+        throw err;
+      }
+    }
+  }
+  throw new Error('Failed to get pairing code after retries');
 }
 
 /**
@@ -140,7 +160,15 @@ export async function startBot(): Promise<void> {
       keys: makeCacheableSignalKeyStore(state.keys, baileysLogger),
     },
     logger: baileysLogger,
-    printQRInTerminal: false,    // We handle QR ourselves (deprecated option)
+    // Browser identity — use Chrome to avoid being flagged by WA
+    browser: ['Fatawa Bot', 'Chrome', '120.0.0'],
+    // Keep the WebSocket alive with pings every 10s
+    keepAliveIntervalMs: 10_000,
+    // Fail fast on connect so we can retry cleanly
+    connectTimeoutMs: 30_000,
+    // Timeout for individual queries
+    defaultQueryTimeoutMs: 20_000,
+    printQRInTerminal: false,
     syncFullHistory: false,
     markOnlineOnConnect: false,
     generateHighQualityLinkPreview: false,
