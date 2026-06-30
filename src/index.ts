@@ -346,6 +346,52 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ── GET /api/pending — list pending questions awaiting admin approval ────────
+  if (url === '/api/pending' && method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    try {
+      // Get last 10 pending questions
+      const { getFirestore } = await import('firebase-admin/firestore');
+      const db = getFirestore();
+      const snap = await db.collection('_fatawa_pending')
+        .where('status', '==', 'pending')
+        .orderBy('createdAt', 'desc')
+        .limit(10)
+        .get();
+      const pending = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      res.end(JSON.stringify({ ok: true, pending }));
+    } catch (err) {
+      res.end(JSON.stringify({ ok: false, pending: [], error: String(err) }));
+    }
+    return;
+  }
+
+  // ── GET /api/debug — current bot routing state ───────────────────────────────
+  if (url === '/api/debug' && method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    try {
+      const { getGroupSettings } = await import('./services/settings.service');
+      const settings = getGroupSettings();
+      // Count KB records
+      let kbCount = 0;
+      try {
+        const { getFirestore } = await import('firebase-admin/firestore');
+        const db = getFirestore();
+        const snap = await db.collection('_fatawa_kb').count().get();
+        kbCount = snap.data().count;
+      } catch {}
+      res.end(JSON.stringify({
+        connected: botConnected,
+        settings,
+        kbCount,
+        timestamp: Date.now(),
+      }));
+    } catch (err) {
+      res.end(JSON.stringify({ error: String(err) }));
+    }
+    return;
+  }
+
   // ── POST /clear-firestore-auth — wipe _wabot_auth collection in Firestore ───
   // Call this BEFORE /reset-auth when changing numbers, so Cloud Run doesn't
   // restore old credentials from Firestore on the next restart.
