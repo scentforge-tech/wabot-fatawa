@@ -140,10 +140,11 @@ input[type=tel]::placeholder{color:#444;}
     </ul></div>
 
     <div class="form-group">
-      <label for="phone-input">Bot's WhatsApp phone number (with country code)</label>
-      <input type="tel" id="phone-input" placeholder="e.g. 923001234567 or +92 300 1234567"
+      <label for="phone-input">Bot's WhatsApp phone number</label>
+      <input type="tel" id="phone-input" placeholder="923001234567  (country code + number, digits only)"
              oninput="document.getElementById('code-box').style.display='none';
                       document.getElementById('msg-box').style.display='none';">
+      <div style="color:#555;font-size:.78rem;margin-top:5px">No +, no spaces, no dashes. Example: <code style="color:#25d366">923001234567</code> for +92-300-1234567</div>
     </div>
     <button class="btn" id="get-code-btn" onclick="requestCode()">Get Pairing Code</button>
 
@@ -152,6 +153,7 @@ input[type=tel]::placeholder{color:#444;}
     <div class="code-box" id="code-box">
       <div class="code-display" id="code-display"></div>
       <p class="code-label">Enter this code in WhatsApp → Linked Devices → Link with phone number</p>
+      <p style="color:#f59e0b;font-size:.78rem;margin-top:8px">⏱ Code expires in ~60 seconds</p>
     </div>
   </div>
 </div>
@@ -165,28 +167,39 @@ function switchTab(name, el) {
 }
 
 async function requestCode() {
-  const phone = document.getElementById('phone-input').value.trim();
-  if (!phone) { showMsg('Please enter the phone number', 'error'); return; }
+  const phone = document.getElementById('phone-input').value.replace(/[^0-9]/g,'');
+  if (phone.length < 10) {
+    showMsg('\u274c Enter the full number with country code, digits only. Example: 923001234567', 'error');
+    return;
+  }
   const btn = document.getElementById('get-code-btn');
   btn.disabled = true;
-  btn.textContent = 'Requesting…';
-  showMsg('', '');
+  btn.textContent = '\u23f3 Requesting\u2026 (may take up to 20s)';
+  showMsg('\u231b Connecting to WhatsApp\u2026 please wait', 'info');
   try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 22000);
     const resp = await fetch('/link-phone', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ phone })
+      body: JSON.stringify({ phone }),
+      signal: controller.signal
     });
+    clearTimeout(timer);
     const data = await resp.json();
     if (resp.ok && data.code) {
       document.getElementById('code-display').textContent = data.code;
       document.getElementById('code-box').style.display = 'block';
-      showMsg('✅ Code generated! Enter it in WhatsApp within 60 seconds.', 'info');
+      showMsg('\u2705 Code generated! Enter it in WhatsApp within 60 seconds.', 'info');
     } else {
-      showMsg('❌ ' + (data.error || 'Failed to get code. Try again.'), 'error');
+      showMsg('\u274c ' + (data.error || 'Failed to get code. Try again.'), 'error');
     }
   } catch(e) {
-    showMsg('❌ Network error. Try again.', 'error');
+    if (e.name === 'AbortError') {
+      showMsg('\u274c Timed out — the bot may still be starting. Wait 10 seconds and try again.', 'error');
+    } else {
+      showMsg('\u274c ' + (e.message || 'Network error. Try again.'), 'error');
+    }
   } finally {
     btn.disabled = false;
     btn.textContent = 'Get Pairing Code';

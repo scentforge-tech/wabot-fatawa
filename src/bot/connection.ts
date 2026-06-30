@@ -30,16 +30,36 @@ export function setConnectionCallback(cb: (connected: boolean) => void): void { 
 
 /**
  * Request a pairing code for phone-number-based linking.
- * Call AFTER startBot() — the socket must be initialised.
+ * Call AFTER startBot() — waits for the WebSocket to be open first.
  * Returns the 8-character code the user types in WhatsApp.
  */
 export async function requestPairingCodeForPhone(phoneNumber: string): Promise<string> {
-  if (!sock) throw new Error('Bot socket not initialised — call startBot() first');
-  // Baileys expects the number in E.164 format without + or spaces, e.g. "923001234567"
+  if (!sock) throw new Error('Bot not started yet — wait a few seconds and try again');
+
+  // Validate: digits only, at least 10 characters (e.g. 923001234567)
   const cleaned = phoneNumber.replace(/[^0-9]/g, '');
+  if (cleaned.length < 10) {
+    throw new Error('Invalid phone number — include country code with no + or spaces, e.g. 923001234567');
+  }
+
+  // If already authenticated, pairing code is not needed
+  if (sock.authState.creds.registered) {
+    throw new Error('Device is already linked — no pairing code needed');
+  }
+
+  // Wait for the WebSocket to be open (with 15s timeout)
+  const timeoutMs = 15_000;
+  await Promise.race([
+    sock.waitForSocketOpen(),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Timed out waiting for WhatsApp connection — try again in a moment')), timeoutMs),
+    ),
+  ]);
+
   const code = await sock.requestPairingCode(cleaned);
   return code;
 }
+
 
 // When ADMIN_GROUP_JID or PUBLIC_GROUP_JID are not set, the bot logs every
 // incoming group JID so you can identify your groups. Post any message in each
