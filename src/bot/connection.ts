@@ -134,11 +134,13 @@ export async function resetAuthAndRestart(): Promise<void> {
   await startBot();
 }
 
-// When ADMIN_GROUP_JID or PUBLIC_GROUP_JID are not set, the bot logs every
-// incoming group JID so you can identify your groups. Post any message in each
-// group and watch the logs — the JID will be printed clearly.
-
-const DISCOVERY_MODE = !env.ADMIN_GROUP_JID || !env.PUBLIC_GROUP_JID;
+// DISCOVERY_MODE: only active when BOTH env vars AND Firestore settings are empty.
+// In production, groups are set via dashboard (Firestore), so env vars are empty
+// but getGroupSettings() returns the correct JIDs → DISCOVERY_MODE stays false.
+function isDiscoveryMode(): boolean {
+  const s = getGroupSettings();
+  return (!env.ADMIN_GROUP_JID && !s.adminGroupJid) || (!env.PUBLIC_GROUP_JID && !s.publicGroupJid);
+}
 
 // ─── Global Exception Handlers ───────────────────────────────────────────────
 
@@ -185,7 +187,7 @@ export async function startBot(): Promise<void> {
 
   logger.info({ version, isLatest }, 'Baileys version loaded');
 
-  if (DISCOVERY_MODE) {
+  if (isDiscoveryMode()) {
     logger.warn(
       '🔍  JID DISCOVERY MODE ACTIVE — ADMIN_GROUP_JID or PUBLIC_GROUP_JID not set.\n' +
       '    Post any message in your groups and the JID will be printed below.\n' +
@@ -247,7 +249,7 @@ export async function startBot(): Promise<void> {
       if (_connectionCallback) _connectionCallback(true);
       logger.info('✅  WhatsApp connected! Browser page at http://localhost:8080 will update.');
 
-      if (DISCOVERY_MODE) {
+      if (isDiscoveryMode()) {
         logger.info(
           '🔍  Connected! Now send a message in each of your WhatsApp groups.\n' +
           '    The group JID will appear in the logs below.',
@@ -294,19 +296,18 @@ export async function startBot(): Promise<void> {
       const isGroup = remoteJid.endsWith('@g.us');
 
       // ── JID Discovery ─────────────────────────────────────────────────────
-      if (DISCOVERY_MODE && isGroup) {
+      if (isDiscoveryMode() && isGroup) {
         const pushName = msg.pushName ?? 'unknown';
         console.log('\n' + '═'.repeat(60));
-        console.log('  🔍  GROUP MESSAGE DETECTED');
+        console.log('  🔍  GROUP MESSAGE DETECTED — DISCOVERY MODE');
         console.log(`  JID      : ${remoteJid}`);
         console.log(`  From     : ${pushName}`);
         console.log(`  Msg Type : ${msgType}`);
-        console.log('  ─── Add this to your .env ───');
-        console.log(`  ADMIN_GROUP_JID=${remoteJid}   ← if this is the admin group`);
-        console.log(`  PUBLIC_GROUP_JID=${remoteJid}  ← if this is the public group`);
+        console.log('  ─── Add this to .env or configure via Dashboard Setup ───');
+        console.log(`  ADMIN_GROUP_JID=${remoteJid}`);
+        console.log(`  PUBLIC_GROUP_JID=${remoteJid}`);
         console.log('═'.repeat(60) + '\n');
-        logger.info({ jid: remoteJid, from: pushName }, '🔍 JID discovered — copy to .env');
-        continue;
+        // NOTE: do NOT continue here — fall through to normal routing below
       }
 
       // ── Normal operation ──────────────────────────────────────────────────
