@@ -72,6 +72,9 @@ export async function downloadAuthFromGCS(authDir: string): Promise<boolean> {
  * Called from creds.update so credentials are persisted immediately.
  */
 export async function uploadFileToGCS(localFilePath: string, fileName: string): Promise<void> {
+  // Skip silently when GCS is not configured (local dev)
+  if (!GCS_BUCKET) return;
+
   const storage = getStorage();
   if (!storage) return;
 

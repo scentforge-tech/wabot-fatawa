@@ -8,9 +8,10 @@ steps:
       - '-c'
       - |
         mkdir -p auth_info_baileys
-        gsutil -m cp -r gs://masjidmap-5yvj5-wabot-auth/auth/. auth_info_baileys/ \
-          && echo "Auth files restored from GCS" \
-          || echo "WARNING: No auth files in GCS - bot will show QR on first run"
+        gsutil -m cp "gs://masjidmap-5yvj5-wabot-auth/auth/*" auth_info_baileys/ \
+          && echo "Auth restored: $(ls auth_info_baileys/ | wc -l) files" \
+          && ls auth_info_baileys/ \
+          || echo "WARNING: GCS copy failed - no auth in image"
 
   # Build the Docker image
   - name: 'gcr.io/cloud-builders/docker'
