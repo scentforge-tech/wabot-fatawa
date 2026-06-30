@@ -11,27 +11,24 @@ import logger from '../../config/logger';
 
 // ─── Text Message Handler — Fatawa Semantic Search ───────────────────────────
 //
-// Flow:
-//   1. User asks in any language (Urdu / Roman Urdu / English)
-//   2. Gemini embedding → semantic search over _fatawa_kb
-//   3. High confidence (≥0.72)  → send audio preview + transcript to admin group
-//      Low confidence / no match → send question to admin group for manual reply
-//   4. Admin says "thik hai" (or quotes the message) → approval.handler.ts
-//      sends the matched Sheikh audio file to public group, quoting user's message
+// DESIGN: Each step has its own try/catch.
+// The WhatsApp notification to admin ALWAYS fires, even if Firestore fails.
+// This makes the flow bulletproof.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 
 const HIGH_CONFIDENCE = 0.72;
+const MED_CONFIDENCE  = 0.55;
 
 export async function handleTextMessage(
   sock: WASocket,
   msg: WAMessage,
 ): Promise<void> {
-  const msgId        = msg.key.id ?? 'unknown';
-  const senderJid    = msg.key.participant ?? msg.key.remoteJid ?? '';
+  const msgId          = msg.key.id ?? 'unknown';
+  const senderJid      = msg.key.participant ?? msg.key.remoteJid ?? '';
   const publicGroupJid = msg.key.remoteJid ?? '';
 
-  // Extract text
+  // ── Extract text ────────────────────────────────────────────────────────────
   const rawText =
     msg.message?.conversation ||
     msg.message?.extendedTextMessage?.text ||
@@ -48,150 +45,121 @@ export async function handleTextMessage(
 
   const senderName = msg.pushName ?? senderJid.split('@')[0];
 
-  // Get live group settings (stored in Firestore, set from dashboard)
+  // ── Get admin JID from live settings ────────────────────────────────────────
   const settings = getGroupSettings();
-  const adminGroupJid = settings.adminGroupJid || env.ADMIN_GROUP_JID;
+  const adminGroupJid = settings.adminGroupJid || env.ADMIN_GROUP_JID || '';
+
+  logger.info(
+    { msgId, senderJid, rawText, adminGroupJid: adminGroupJid.slice(0,20), publicGroupJid },
+    '💬 Text question received — routing to admin',
+  );
 
   if (!adminGroupJid) {
-    logger.error({ msgId }, 'No admin group configured — cannot forward question. Set it in the dashboard.');
+    logger.error({ msgId }, '❌ No admin group JID configured — open dashboard Setup tab and save groups');
     return;
   }
 
-  logger.info({ msgId, senderJid, rawText }, '💬 Text question received from public group');
-
-  // ── 1. Semantic search in fatawa KB ─────────────────────────────────────────
-  let matches: Awaited<ReturnType<typeof searchFatawa>> = [];
+  // ── Step 1: Semantic search (best-effort, failures are non-fatal) ───────────
+  let topMatch: Awaited<ReturnType<typeof searchFatawa>>[0] | undefined;
   try {
-    matches = await searchFatawa(rawText, { topN: 3, threshold: 0.50 });
+    logger.info({ msgId }, '🔍 Searching fatawa KB…');
+    const matches = await searchFatawa(rawText, { topN: 1, threshold: MED_CONFIDENCE });
+    topMatch = matches[0];
+    logger.info({ msgId, score: topMatch?.score, file: topMatch?.record?.audioFileName }, '🔍 Search complete');
   } catch (err) {
-    logger.error({ err, msgId }, 'Fatawa search failed — falling back to manual');
-    matches = [];
+    logger.error({ err, msgId }, '⚠️  Fatawa KB search failed — continuing with no-match flow');
+    topMatch = undefined;
   }
 
-  const topMatch = matches[0];
+  // ── Step 2: Build the admin notification text ───────────────────────────────
+  const qId = generateQuestionId();
 
-  // ── 2a. HIGH CONFIDENCE — suggest specific audio answer ─────────────────────
+  let adminNotice: string;
+  let audioFileName = '';
+  let confidence    = 0;
+  let transcript    = '';
+
   if (topMatch && topMatch.score >= HIGH_CONFIDENCE && topMatch.record.audioFileName) {
-    const rec   = topMatch.record;
-    const score = topMatch.score;
-    const qId   = generateQuestionId();
+    const rec = topMatch.record;
+    audioFileName = rec.audioFileName;
+    confidence    = topMatch.score;
+    transcript    = (rec.answerTranscript || rec.answerText || '').slice(0, 200);
+    const pct     = Math.round(confidence * 100);
 
-    const confidencePct = Math.round(score * 100);
-    const transcriptPreview = (rec.answerTranscript || rec.answerText || '').slice(0, 200);
-
-    // Save pending state in Firestore
-    await savePendingQuestion({
-      questionId:           qId,
-      publicGroupJid,
-      quotedMessageId:      msgId,
-      senderJid,
-      senderName,
-      questionText:         rawText,
-      suggestedAudioFile:   `gs://${env.GCS_BUCKET_NAME}/${rec.audioFileName}`,
-      suggestedAudioFileName: rec.audioFileName,
-      suggestedTranscript:  rec.answerTranscript || rec.answerText || '',
-      confidence:           score,
-      status:               'pending',
-    });
-
-    // Notify admin group
-    const adminNotice =
-      `🎤 *FATAWA MATCH FOUND*\n\n` +
-      `*❓ Question (public group):*\n"${rawText}"\n` +
-      `👤 _${senderName}_\n\n` +
-      `*🎙️ Suggested Audio:* \`${rec.audioFileName}\`\n` +
-      `*📊 Confidence:* ${confidencePct}%\n` +
-      `*📂 Topic:* ${rec.topic || 'General'}\n\n` +
-      `*📝 Transcript preview:*\n${transcriptPreview}${transcriptPreview.length >= 200 ? '…' : ''}\n\n` +
-      `✅ Reply *thik hai* to send this audio to the pilgrim\n` +
-      `❌ Reply *nahi* to skip (you can then send your own voice)\n` +
-      `🆔 _ref: ${qId}_`;
-
-    const sentMsg = await sock.sendMessage(adminGroupJid, { text: adminNotice });
-    const adminMsgId = sentMsg?.key.id;
-    if (adminMsgId) {
-      await savePendingAdminMsgId(qId, adminMsgId);
-    }
-
-    logger.info(
-      { qId, audioFile: rec.audioFileName, confidence: confidencePct, adminMsgId },
-      '✅ High-confidence match sent to admin group for approval',
-    );
-    return;
-  }
-
-  // ── 2b. MEDIUM CONFIDENCE — mention best match but ask Shaikh ───────────────
-  if (topMatch && topMatch.score >= 0.55 && topMatch.record.audioFileName) {
-    const rec   = topMatch.record;
-    const qId   = generateQuestionId();
-    const confidencePct = Math.round(topMatch.score * 100);
-    const transcriptPreview = (rec.answerTranscript || rec.answerText || '').slice(0, 150);
-
-    await savePendingQuestion({
-      questionId:           qId,
-      publicGroupJid,
-      quotedMessageId:      msgId,
-      senderJid,
-      senderName,
-      questionText:         rawText,
-      suggestedAudioFile:   `gs://${env.GCS_BUCKET_NAME}/${rec.audioFileName}`,
-      suggestedAudioFileName: rec.audioFileName,
-      suggestedTranscript:  rec.answerTranscript || rec.answerText || '',
-      confidence:           topMatch.score,
-      status:               'pending',
-    });
-
-    const adminNotice =
-      `⚠️ *POSSIBLE MATCH (${confidencePct}% confidence)*\n\n` +
+    adminNotice =
+      `🎤 *FATAWA MATCH FOUND* (${pct}%)\n\n` +
       `*❓ Question:*\n"${rawText}"\n` +
       `👤 _${senderName}_\n\n` +
-      `*🎙️ Closest audio:* \`${rec.audioFileName}\`\n` +
+      `*🎙️ Suggested Audio:* \`${audioFileName}\`\n` +
       `*📂 Topic:* ${rec.topic || 'General'}\n\n` +
-      `*📝 Preview:*\n${transcriptPreview}${transcriptPreview.length >= 150 ? '…' : ''}\n\n` +
-      `✅ *thik hai* → send this audio to pilgrim\n` +
+      `*📝 Transcript:*\n${transcript}${transcript.length >= 200 ? '…' : ''}\n\n` +
+      `✅ Reply *thik hai* → send this audio to pilgrim\n` +
+      `❌ Reply *nahi* → skip\n` +
+      `🆔 _ref: ${qId}_`;
+
+  } else if (topMatch && topMatch.score >= MED_CONFIDENCE && topMatch.record.audioFileName) {
+    const rec = topMatch.record;
+    audioFileName = rec.audioFileName;
+    confidence    = topMatch.score;
+    transcript    = (rec.answerTranscript || rec.answerText || '').slice(0, 150);
+    const pct     = Math.round(confidence * 100);
+
+    adminNotice =
+      `⚠️ *POSSIBLE MATCH (${pct}% confidence)*\n\n` +
+      `*❓ Question:*\n"${rawText}"\n` +
+      `👤 _${senderName}_\n\n` +
+      `*🎙️ Closest audio:* \`${audioFileName}\`\n\n` +
+      `*📝 Preview:*\n${transcript}${transcript.length >= 150 ? '…' : ''}\n\n` +
+      `✅ *thik hai* → send this audio\n` +
       `🎤 Or record your own voice answer\n` +
       `❌ *nahi* → discard\n` +
       `🆔 _ref: ${qId}_`;
 
-    const sentMsg = await sock.sendMessage(adminGroupJid, { text: adminNotice });
-    const adminMsgId = sentMsg?.key.id;
-    if (adminMsgId) await savePendingAdminMsgId(qId, adminMsgId);
-
-    logger.info(
-      { qId, audioFile: rec.audioFileName, confidence: confidencePct },
-      '⚠️ Medium-confidence match sent to admin for review',
-    );
-    return;
+  } else {
+    adminNotice =
+      `🆕 *NEW QUESTION — NO MATCH*\n\n` +
+      `*❓ Question:*\n"${rawText}"\n` +
+      `👤 _${senderName}_\n\n` +
+      `_No historical fatwa audio found._\n\n` +
+      `🎤 Please record a voice answer — it will be forwarded automatically.\n` +
+      `🆔 _ref: ${qId}_`;
   }
 
-  // ── 2c. NO MATCH — ask Shaikh to answer manually ────────────────────────────
-  const qId = generateQuestionId();
-  await savePendingQuestion({
-    questionId:             qId,
-    publicGroupJid,
-    quotedMessageId:        msgId,
-    senderJid,
-    senderName,
-    questionText:           rawText,
-    suggestedAudioFile:     '',
-    suggestedAudioFileName: '',
-    suggestedTranscript:    '',
-    confidence:             0,
-    status:                 'pending',
-  });
+  // ── Step 3: Save to Firestore (non-fatal — notification still goes through) ─
+  try {
+    await savePendingQuestion({
+      questionId:             qId,
+      publicGroupJid,
+      quotedMessageId:        msgId,
+      senderJid,
+      senderName,
+      questionText:           rawText,
+      suggestedAudioFile:     audioFileName ? `gs://${env.GCS_BUCKET_NAME}/${audioFileName}` : '',
+      suggestedAudioFileName: audioFileName,
+      suggestedTranscript:    transcript,
+      confidence,
+      status:                 'pending',
+    });
+    logger.info({ qId }, '✅ Pending question saved to Firestore');
+  } catch (err) {
+    logger.error({ err, qId }, '⚠️  Failed to save pending question to Firestore — continuing');
+  }
 
-  const adminNotice =
-    `🆕 *NEW QUESTION — NO MATCH IN DATABASE*\n\n` +
-    `*❓ Question:*\n"${rawText}"\n` +
-    `👤 _${senderName}_\n\n` +
-    `_No historical audio fatwa found for this question._\n\n` +
-    `🎤 Please record a voice answer — it will be forwarded to the pilgrim automatically.\n` +
-    `📝 Or reply with a text answer.\n` +
-    `🆔 _ref: ${qId}_`;
+  // ── Step 4: Send WhatsApp notification to admin group (must always succeed) ─
+  try {
+    logger.info({ adminGroupJid, qId }, '📤 Sending notification to admin group…');
+    const sentMsg    = await sock.sendMessage(adminGroupJid, { text: adminNotice });
+    const adminMsgId = sentMsg?.key.id;
+    logger.info({ qId, adminMsgId, adminGroupJid }, '✅ Admin notification sent!');
 
-  const sentMsg = await sock.sendMessage(adminGroupJid, { text: adminNotice });
-  const adminMsgId = sentMsg?.key.id;
-  if (adminMsgId) await savePendingAdminMsgId(qId, adminMsgId);
-
-  logger.info({ qId, msgId }, '🆕 No match — question forwarded to admin for manual answer');
+    if (adminMsgId) {
+      try {
+        await savePendingAdminMsgId(qId, adminMsgId);
+      } catch (e) {
+        logger.warn({ e }, 'Could not save admin msg ID to Firestore');
+      }
+    }
+  } catch (err) {
+    logger.error({ err, adminGroupJid, qId }, '❌ CRITICAL: Failed to send WhatsApp notification to admin group');
+  }
 }
