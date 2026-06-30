@@ -37,7 +37,7 @@ const PROJECT_ID      = process.env.FIREBASE_PROJECT_ID;
 const SA_PATH         = process.env.FIREBASE_SERVICE_ACCOUNT_PATH ?? './firebase-service-account.json';
 const GEMINI_KEY      = process.env.GEMINI_API_KEY;
 const EMBEDDING_MODEL = 'gemini-embedding-001';
-const GEMINI_MODEL    = 'gemini-2.0-flash';
+const GEMINI_MODEL    = 'gemini-2.5-flash';
 const GEMINI_BASE     = 'https://generativelanguage.googleapis.com/v1beta';
 const LIMIT           = process.env.REINGEST_LIMIT ? parseInt(process.env.REINGEST_LIMIT) : Infinity;
 const FORCE           = process.env.REINGEST_FORCE === 'true';

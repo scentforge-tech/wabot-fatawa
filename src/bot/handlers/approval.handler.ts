@@ -8,70 +8,43 @@ import {
   getMostRecentPending,
   updatePendingStatus,
   downloadAudioFile,
+  PendingQuestion,
 } from '../../services/fatawa-kb.service';
-import { transcribeAudio } from '../../services/whisper.service';
 import { getGroupSettings } from '../../services/settings.service';
 import { env } from '../../config/env';
 import logger from '../../config/logger';
 
-// ─── Keyword Detection ────────────────────────────────────────────────────────
-
-const APPROVAL_KEYWORDS = [
-  'approve', 'approved', 'yes', 'correct', 'right', 'send it', 'send', 'go ahead',
-  'haan', 'han', 'sahi hai', 'sahi he', 'sahih hai',
-  'theek hai', 'theek he', 'thik hai', 'thik he', 'tik hai',
-  'bilkul', 'bilkul sahi', 'bilkul theek',
-  'ja sakta hai', 'bhej do', 'bhejen', 'munasib hai', 'ok', 'okay', 'achha', 'acha',
-  '\u0679\u06BE\u06CC\u06A9 \u06C1\u06D2',   // ٹھیک ہے
-  '\u0679\u06BE\u06CC\u06A9',               // ٹھیک
-  '\u06C1\u0627\u06BA',                    // ہاں
-  '\u062C\u06CC \u06C1\u0627\u06BA',       // جی ہاں
-  '\u0628\u06BE\u06CC\u062C \u062F\u0648',  // بھیج دو
-  '\u0628\u06BE\u06CC\u062C\u0648',        // بھیجو
-  '\u0635\u062D\u06CC\u062D \u06C1\u06D2',  // صحیح ہے
-  '\u0628\u0627\u0644\u06A9\u0644',        // بالکل
-  '\u0627\u0686\u06BE\u0627',              // اچھا
-  '\u062C\u06CC',                          // جی
-  '\u0920\u0940\u0915 \u0939\u0948',       // ठीक है
-  '\u0920\u0940\u0915',                    // ठीक
-  '\u0939\u093E\u0901',                    // हाँ
-  '\u092D\u0947\u091C\u094B',              // भेजो
-];
-
-const REJECTION_KEYWORDS = [
-  'nahi', 'na', 'no', 'reject', 'galat', 'ghalat',
-  'theek nahi', 'wapas lo', 'mat bhejo', 'rok lo',
-  '\u0646\u06C1\u06CC\u06BA',              // نہیں
-  '\u063A\u0644\u0637',                    // غلط
-  '\u0679\u06BE\u06CC\u06A9 \u0646\u06C1\u06CC\u06BA',  // ٹھیک نہیں
-  '\u0645\u062A \u0628\u06BE\u06CC\u062C\u0648', // مت بھیجو
-  '\u0928\u0939\u0940\u0902',              // नहीं
-  '\u0917\u0932\u0924',                    // गलत
-];
-
-function detectIntent(text: string): 'approved' | 'rejected' | 'unclear' {
-  const n = text.toLowerCase().trim();
-  for (const kw of REJECTION_KEYWORDS) if (n.includes(kw)) return 'rejected';
-  for (const kw of APPROVAL_KEYWORDS)  if (n.includes(kw)) return 'approved';
-  return 'unclear';
-}
-
-// ─── Approval Handler ─────────────────────────────────────────────────────────
+// ─── Intent Detection ─────────────────────────────────────────────────────────
 //
-// When admin sends a message in the admin group:
-//
-// CASE A — Voice note (Shaikh's own answer):
-//   • Transcribe to detect intent
-//   • If "thik hai" → dispatch PENDING audio from GCS to public group
-//   • If new substantive answer → forward that voice directly to public group
-//
-// CASE B — Text message:
-//   • Detect "thik hai" / "nahi"
-//   • Act on the most-recently-forwarded pending question
-//
-// On approval: quote the user's original message when sending to public group
+// COMMANDS (Sheikh sends in admin group):
+//   Y / yes / thik hai / ha → APPROVE: send suggested audio to public group
+//   N / no / nahi / galat   → REJECT: discard suggestion, ask Sheikh to record
+//   A / rec / record        → ACKNOWLEDGE: waiting for Sheikh's voice note now
+//   (any other text)        → SEND TEXT: send that text as answer to public group
+//   (voice note)            → FORWARD: forward voice to public group, quoting question
 //
 // ─────────────────────────────────────────────────────────────────────────────
+
+const Y_PATTERNS = /^(y|yes|ha|haan|han|ok|okay|ji|thik hai?|theek hai?|sahi|sahi hai|bilkul|acha|achha|send|bhej|bhejen|bhejdo|approve|approved|صحیح|ٹھیک|ہاں|جی|بھیج|بالکل|اچھا)$/i;
+const N_PATTERNS = /^(n|no|nahi|na|nahi|reject|galat|ghalat|rok|mat bhejo|نہیں|غلط|مت)$/i;
+const A_PATTERNS = /^(a|rec|record|ab bolun|main bolun|awaiting|wait|aata hun)$/i;
+
+type Intent = 'approve' | 'reject' | 'await_voice' | 'send_text';
+
+function detectIntent(text: string): Intent {
+  const t = text.trim();
+  const single = t.replace(/[.!?،۔]/g, '').trim();
+  if (Y_PATTERNS.test(single)) return 'approve';
+  if (N_PATTERNS.test(single)) return 'reject';
+  if (A_PATTERNS.test(single)) return 'await_voice';
+  return 'send_text';
+}
+
+// ─── State: waiting for Sheikh's voice after 'A' ──────────────────────────────
+// Maps adminGroupJid → questionId being awaited
+const _awaitingVoice = new Map<string, string>();
+
+// ─── Main Handler ─────────────────────────────────────────────────────────────
 
 export async function handleApprovalMessage(
   sock: WASocket,
@@ -79,7 +52,12 @@ export async function handleApprovalMessage(
 ): Promise<void> {
   const msgId   = msg.key.id ?? 'unknown';
   const msgType = msg.message ? Object.keys(msg.message)[0] : 'unknown';
-  logger.info({ msgId, msgType }, 'Message from admin group');
+
+  const { adminGroupJid: aJid, publicGroupJid: pJid } = getGroupSettings();
+  const adminJid  = aJid  || env.ADMIN_GROUP_JID || '';
+  const publicJid = pJid  || env.PUBLIC_GROUP_JID || '';
+
+  logger.info({ msgId, msgType }, '📨 Admin group message');
 
   const isAudio =
     msgType === 'audioMessage' ||
@@ -87,11 +65,7 @@ export async function handleApprovalMessage(
     (msgType === 'documentMessage' &&
       (msg.message?.documentMessage?.mimetype ?? '').startsWith('audio/'));
 
-  // Get live JIDs from settings (set from dashboard, stored in Firestore)
-  const { adminGroupJid } = getGroupSettings();
-  const adminJid = adminGroupJid || env.ADMIN_GROUP_JID;
-
-  // ── CASE A: Voice note ────────────────────────────────────────────────────
+  // ── CASE A: Voice note from Sheikh ────────────────────────────────────────
   if (isAudio) {
     let audioBuffer: Buffer;
     try {
@@ -101,39 +75,22 @@ export async function handleApprovalMessage(
       )) as Buffer;
     } catch (err) {
       logger.error({ err, msgId }, 'Failed to download admin voice note');
-      await sock.sendMessage(adminJid || env.ADMIN_GROUP_JID, { text: '⚠️ Failed to download voice note. Please resend.' });
+      await safeSend(sock, adminJid, { text: '⚠️ Failed to download voice note. Please resend.' });
       return;
     }
 
     if (!audioBuffer || audioBuffer.length < 100) return;
 
-    // Transcribe to detect intent
-    let transcription = '';
-    try {
-      const result = await transcribeAudio(audioBuffer, 'admin.ogg', 'ur');
-      transcription = result.text;
-      logger.info({ transcription, msgId }, 'Admin voice transcribed');
-    } catch (err) {
-      logger.warn({ err }, 'Transcription failed — forwarding voice directly');
-      await forwardVoiceToPublic(sock, audioBuffer, msg, msgId);
-      return;
-    }
+    // Find pending question (prefer quoted, else most recent)
+    const pending = await findPendingForMsg(msg);
+    const targetPublicJid = pending?.publicGroupJid || publicJid;
 
-    const intent = detectIntent(transcription);
-
-    if (intent === 'approved') {
-      await dispatchPendingAudio(sock, msg, transcription);
-    } else if (intent === 'rejected') {
-      await rejectPending(sock, msg, transcription);
-    } else {
-      // Shaikh recorded a new substantive answer — forward it directly
-      logger.info({ msgId, transcription }, 'New voice answer from Shaikh — forwarding directly');
-      await forwardVoiceToPublic(sock, audioBuffer, msg, msgId);
-    }
+    // Forward voice to public group, quoting the original question
+    await forwardVoiceToPublic(sock, audioBuffer, msg, msgId, pending, adminJid, targetPublicJid);
     return;
   }
 
-  // ── CASE B: Text message ──────────────────────────────────────────────────
+  // ── CASE B: Text message from Sheikh ──────────────────────────────────────
   const text =
     msg.message?.conversation ||
     msg.message?.extendedTextMessage?.text ||
@@ -141,23 +98,233 @@ export async function handleApprovalMessage(
 
   if (!text) return;
 
-  logger.info({ text, msgId }, 'Text message from admin group');
   const intent = detectIntent(text);
+  logger.info({ text, intent, msgId }, '🔎 Admin intent detected');
 
-  if (intent === 'approved') {
-    await dispatchPendingAudio(sock, msg, text);
-  } else if (intent === 'rejected') {
-    await rejectPending(sock, msg, text);
+  // Find the pending question this message refers to
+  const pending = await findPendingForMsg(msg);
+  const targetPublicJid = pending?.publicGroupJid || publicJid;
+
+  switch (intent) {
+    // ── Y: APPROVE — send the suggested audio from KB ───────────────────────
+    case 'approve':
+      await dispatchSuggestedAudio(sock, msg, pending, adminJid, targetPublicJid);
+      break;
+
+    // ── N: REJECT — discard, ask for voice ──────────────────────────────────
+    case 'reject':
+      await handleReject(sock, pending, adminJid);
+      break;
+
+    // ── A: ACKNOWLEDGE — Sheikh will send voice next ─────────────────────────
+    case 'await_voice':
+      if (pending) {
+        _awaitingVoice.set(adminJid, pending.questionId);
+        await safeSend(sock, adminJid, {
+          text:
+            `🎙️ *Ready — send your voice note now.*\n\n` +
+            `*Q:* "${pending.questionText}"\n` +
+            `👤 _${pending.senderName ?? 'pilgrim'}_\n\n` +
+            `Your voice will be forwarded to the pilgrim's group automatically.`,
+        });
+      } else {
+        await safeSend(sock, adminJid, {
+          text: `🎙️ Ready — send your voice note. It will be forwarded to the public group.`,
+        });
+      }
+      break;
+
+    // ── Any other text: send AS the text answer to public group ──────────────
+    case 'send_text':
+      await sendTextAnswerToPublic(sock, text, pending, adminJid, targetPublicJid);
+      break;
   }
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Send suggested KB audio to public group ──────────────────────────────────
 
-async function findPendingForMsg(msg: WAMessage) {
-  // Try quoted message first
+async function dispatchSuggestedAudio(
+  sock: WASocket,
+  _msg: WAMessage,
+  pending: PendingQuestion | null,
+  adminJid: string,
+  publicGroupJid: string,
+): Promise<void> {
+  if (!pending) {
+    await safeSend(sock, adminJid, {
+      text:
+        `✅ Approved — but no pending question found.\n\n` +
+        `🎤 Record a voice note to answer manually.`,
+    });
+    return;
+  }
+
+  if (!pending.suggestedAudioFileName) {
+    // No KB match — tell Sheikh to record voice
+    await safeSend(sock, adminJid, {
+      text:
+        `✅ Noted — but no audio file exists for this question.\n\n` +
+        `*Q:* "${pending.questionText}"\n\n` +
+        `🎤 Please record a voice answer — it will be forwarded automatically.`,
+    });
+    return;
+  }
+
+  // Download audio from GCS
+  let audioBuffer: Buffer;
+  try {
+    audioBuffer = await downloadAudioFile(pending.suggestedAudioFileName);
+  } catch (err) {
+    logger.error({ err, file: pending.suggestedAudioFileName }, 'GCS download failed');
+    await safeSend(sock, adminJid, {
+      text: `❌ Could not download audio file \`${pending.suggestedAudioFileName}\`\n\nError: ${String(err)}\n\n🎤 Please record your own voice answer.`,
+    });
+    return;
+  }
+
+  // Send to public group, quoting the pilgrim's original question
+  try {
+    await sock.sendMessage(
+      publicGroupJid,
+      {
+        audio: audioBuffer,
+        mimetype: 'audio/ogg; codecs=opus',
+        ptt: true,
+      },
+      {
+        quoted: buildQuoteRef(publicGroupJid, pending),
+      },
+    );
+
+    await updatePendingStatus(pending.questionId, 'approved');
+
+    await safeSend(sock, adminJid, {
+      text:
+        `✅ *Audio answer sent to public group*\n\n` +
+        `*Q:* "${pending.questionText}"\n` +
+        `*File:* \`${pending.suggestedAudioFileName}\``,
+    });
+
+    logger.info({ questionId: pending.questionId, file: pending.suggestedAudioFileName }, '✅ KB audio dispatched to public group');
+  } catch (err) {
+    logger.error({ err }, 'Failed to send audio to public group');
+    await safeSend(sock, adminJid, { text: `❌ Failed to send audio to public group: ${String(err)}` });
+  }
+}
+
+// ─── Handle rejection ─────────────────────────────────────────────────────────
+
+async function handleReject(
+  sock: WASocket,
+  pending: PendingQuestion | null,
+  adminJid: string,
+): Promise<void> {
+  if (pending) {
+    await updatePendingStatus(pending.questionId, 'rejected');
+    await safeSend(sock, adminJid, {
+      text:
+        `🚫 *Suggestion rejected.*\n\n` +
+        `*Q:* "${pending.questionText}"\n\n` +
+        `🎤 Send your own voice answer — it will go to the pilgrim automatically.\n` +
+        `📝 Or type *A* then record your voice.\n` +
+        `📝 Or send any text message to send a text reply.`,
+    });
+  } else {
+    await safeSend(sock, adminJid, { text: '🚫 No pending question found to reject.' });
+  }
+}
+
+// ─── Send text answer to public group ────────────────────────────────────────
+
+async function sendTextAnswerToPublic(
+  sock: WASocket,
+  answerText: string,
+  pending: PendingQuestion | null,
+  adminJid: string,
+  publicGroupJid: string,
+): Promise<void> {
+  if (!publicGroupJid) {
+    await safeSend(sock, adminJid, { text: '❌ Public group not configured. Set it in the dashboard.' });
+    return;
+  }
+
+  try {
+    const sendOptions = pending
+      ? { quoted: buildQuoteRef(publicGroupJid, pending) }
+      : undefined;
+
+    await sock.sendMessage(
+      publicGroupJid,
+      { text: answerText },
+      sendOptions,
+    );
+
+    if (pending) {
+      await updatePendingStatus(pending.questionId, 'approved');
+    }
+
+    await safeSend(sock, adminJid, {
+      text: `✅ *Text answer sent to public group.*${pending ? `\n\n*Q:* "${pending.questionText}"` : ''}`,
+    });
+
+    logger.info({ publicGroupJid, answerText: answerText.slice(0, 50) }, '📤 Text answer sent to public group');
+  } catch (err) {
+    logger.error({ err }, 'Failed to send text answer to public group');
+    await safeSend(sock, adminJid, { text: `❌ Failed to send answer: ${String(err)}` });
+  }
+}
+
+// ─── Forward Sheikh's voice note to public group ─────────────────────────────
+
+async function forwardVoiceToPublic(
+  sock: WASocket,
+  audioBuffer: Buffer,
+  _msg: WAMessage,
+  _msgId: string,
+  pending: PendingQuestion | null,
+  adminJid: string,
+  publicGroupJid: string,
+): Promise<void> {
+  if (!publicGroupJid) {
+    await safeSend(sock, adminJid, { text: '❌ Public group not configured. Open dashboard Setup tab.' });
+    return;
+  }
+
+  try {
+    const sendOptions = pending
+      ? { quoted: buildQuoteRef(publicGroupJid, pending) }
+      : undefined;
+
+    await sock.sendMessage(
+      publicGroupJid,
+      { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true },
+      sendOptions,
+    );
+
+    if (pending) {
+      await updatePendingStatus(pending.questionId, 'approved');
+    }
+
+    logger.info({ _msgId, publicGroupJid }, '🎤 Sheikh voice forwarded to public group');
+    await safeSend(sock, adminJid, {
+      text: pending
+        ? `✅ *Voice answer forwarded to public group.*\n\n*Q:* "${pending.questionText}"`
+        : `✅ *Voice forwarded to public group.*`,
+    });
+  } catch (err) {
+    logger.error({ err }, 'Failed to forward admin voice');
+    await safeSend(sock, adminJid, { text: `❌ Forward failed: ${String(err)}` });
+  }
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+async function findPendingForMsg(msg: WAMessage): Promise<PendingQuestion | null> {
+  // Try quoted message ID first (most accurate)
   const quotedId =
     msg.message?.extendedTextMessage?.contextInfo?.stanzaId ??
     msg.message?.audioMessage?.contextInfo?.stanzaId ??
+    (msg.message as any)?.pttMessage?.contextInfo?.stanzaId ??
     undefined;
 
   if (quotedId) {
@@ -169,160 +336,27 @@ async function findPendingForMsg(msg: WAMessage) {
   return getMostRecentPending();
 }
 
-/**
- * Send the matched Sheikh audio file (from GCS) to the public group,
- * quoting the user's original message.
- */
-async function dispatchPendingAudio(
-  sock: WASocket,
-  msg: WAMessage,
-  approvalText: string,
-): Promise<void> {
-  const { adminGroupJid: aJid, publicGroupJid: pJid } = getGroupSettings();
-  const adminJid = aJid || env.ADMIN_GROUP_JID;
-
-  const pending = await findPendingForMsg(msg);
-
-  if (!pending) {
-    await sock.sendMessage(adminJid, {
-      text:
-        `✅ Approval received but no pending question found.\n\n` +
-        `_To send an answer: record a voice note — it will be forwarded automatically._`,
-    });
-    return;
-  }
-
-  const publicGroupJid = pending.publicGroupJid || pJid || env.PUBLIC_GROUP_JID;
-
-  // If there's a suggested audio file → download from GCS and send
-  if (pending.suggestedAudioFileName) {
-    let audioBuffer: Buffer;
-    try {
-      audioBuffer = await downloadAudioFile(pending.suggestedAudioFileName);
-    } catch (err) {
-      logger.error({ err, file: pending.suggestedAudioFileName }, 'GCS download failed');
-      await sock.sendMessage(adminJid, {
-        text: `❌ Failed to download audio file \`${pending.suggestedAudioFileName}\` from GCS.\n\nError: ${String(err)}`,
-      });
-      return;
-    }
-
-    try {
-      // Send Sheikh audio quoting the user's original message
-      await sock.sendMessage(
-        publicGroupJid,
-        {
-          audio: audioBuffer,
-          mimetype: 'audio/ogg; codecs=opus',
-          ptt: true,  // voice note style
-        },
-        {
-          quoted: {
-            key: {
-              remoteJid: publicGroupJid,
-              id:        pending.quotedMessageId,
-              fromMe:    false,
-              participant: pending.senderJid,
-            },
-            message: {
-              conversation: pending.questionText,
-            },
-          },
-        },
-      );
-
-      await updatePendingStatus(pending.questionId, 'approved');
-      await sock.sendMessage(env.ADMIN_GROUP_JID, {
-        text:
-          `✅ *Audio answer sent to public group*\n\n` +
-          `*Q:* "${pending.questionText}"\n` +
-          `*File:* \`${pending.suggestedAudioFileName}\`\n` +
-          `*Approved:* "${approvalText}"`,
-      });
-      logger.info(
-        { questionId: pending.questionId, file: pending.suggestedAudioFileName },
-        '✅ Sheikh audio dispatched to public group',
-      );
-    } catch (err) {
-      logger.error({ err }, 'Failed to send audio to public group');
-      await sock.sendMessage(env.ADMIN_GROUP_JID, {
-        text: `❌ Failed to send audio to public group: ${String(err)}`,
-      });
-    }
-    return;
-  }
-
-  // No audio file (manual-only question) — inform admin
-  await sock.sendMessage(env.ADMIN_GROUP_JID, {
-    text:
-      `✅ Approval noted for:\n"${pending.questionText}"\n\n` +
-      `⚠️ No audio file was found for this question. Please record a voice note to answer.`,
-  });
+/** Build a quoted message reference to the pilgrim's original question */
+function buildQuoteRef(publicGroupJid: string, pending: PendingQuestion) {
+  return {
+    key: {
+      remoteJid:   publicGroupJid,
+      id:          pending.quotedMessageId,
+      fromMe:      false,
+      participant: pending.senderJid,
+    },
+    message: {
+      conversation: pending.questionText,
+    },
+  };
 }
 
-async function rejectPending(
-  sock: WASocket,
-  msg: WAMessage,
-  _rejectionText: string,
-): Promise<void> {
-  const pending = await findPendingForMsg(msg);
-
-  if (pending) {
-    await updatePendingStatus(pending.questionId, 'rejected');
-    await sock.sendMessage(env.ADMIN_GROUP_JID, {
-      text:
-        `🚫 *Suggestion rejected.*\n` +
-        `*Q:* "${pending.questionText}"\n` +
-        `🎤 Please record your own voice answer — it will be forwarded automatically.`,
-    });
-  } else {
-    await sock.sendMessage(env.ADMIN_GROUP_JID, { text: '🚫 No pending question to reject.' });
-  }
-}
-
-async function forwardVoiceToPublic(
-  sock: WASocket,
-  audioBuffer: Buffer,
-  msg: WAMessage,
-  _msgId: string,
-): Promise<void> {
-  // Find the pending question so we can quote the user
-  const pending = await findPendingForMsg(msg);
-  const publicGroupJid = pending?.publicGroupJid ?? env.PUBLIC_GROUP_JID;
-
-  const sendOptions = pending
-    ? {
-        quoted: {
-          key: {
-            remoteJid: publicGroupJid,
-            id:        pending.quotedMessageId,
-            fromMe:    false,
-            participant: pending.senderJid,
-          },
-          message: { conversation: pending.questionText },
-        },
-      }
-    : undefined;
-
+/** Safe sendMessage wrapper — logs but doesn't crash if sending fails */
+async function safeSend(sock: WASocket, jid: string, content: object): Promise<void> {
+  if (!jid) { logger.warn({ content }, 'safeSend: no JID — skipping'); return; }
   try {
-    await sock.sendMessage(
-      publicGroupJid,
-      { audio: audioBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true },
-      sendOptions,
-    );
-
-    if (pending) {
-      await updatePendingStatus(pending.questionId, 'approved');
-    }
-
-    logger.info({ _msgId }, '🎤 Admin voice forwarded to public group');
-    await sock.sendMessage(env.ADMIN_GROUP_JID, {
-      text: '✅ *Voice answer forwarded to public group.*',
-    });
+    await sock.sendMessage(jid, content as Parameters<typeof sock.sendMessage>[1]);
   } catch (err) {
-    logger.error({ err }, 'Failed to forward admin voice');
-    await sock.sendMessage(env.ADMIN_GROUP_JID, {
-      text: `❌ Forward failed: ${String(err)}`,
-    });
+    logger.error({ err, jid }, 'safeSend failed');
   }
 }
