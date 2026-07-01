@@ -27,3 +27,8 @@ Thumbs.db
 # Firebase service account (contains secrets — never commit)
 firebase-service-account.json
 firebase-service-account.json.json
+
+# Large model/data files
+OUTPUT/*.pkl
+OUTPUT/*.xlsx
+OUTPUT/training_data_v3.json
