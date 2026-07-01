@@ -83,45 +83,56 @@ export async function handleTextMessage(
     const rec = topMatch.record;
     audioFileName = rec.audioFileName;
     confidence    = topMatch.score;
-    transcript    = (rec.answerTranscript || rec.answerText || '').slice(0, 200);
+    transcript    = (rec.answerTranscriptProcessed || rec.answerTranscript || rec.answerText || '').slice(0, 180);
     const pct     = Math.round(confidence * 100);
+    const ruling  = rec.authenticRuling ? `\n*⚖️ Islamic Ruling:*\n${rec.authenticRuling.slice(0, 200)}` : '';
+    const english = rec.englishTranslation ? `\n*🌐 Summary:*\n${rec.englishTranslation.slice(0, 200)}` : '';
+    const label   = rec.accuracyLabel ? ` _(${rec.accuracyLabel})_` : '';
 
     adminNotice =
-      `🎤 *FATAWA MATCH FOUND* (${pct}%)\n\n` +
+      `🎤 *HIGH CONFIDENCE MATCH* (${pct}%)${label}\n\n` +
       `*❓ Question:*\n"${rawText}"\n` +
       `👤 _${senderName}_\n\n` +
       `*🎙️ Suggested Audio:* \`${audioFileName}\`\n` +
-      `*📂 Topic:* ${rec.topic || 'General'}\n\n` +
-      `*📝 Transcript:*\n${transcript}${transcript.length >= 200 ? '…' : ''}\n\n` +
-      `✅ Reply *thik hai* → send this audio to pilgrim\n` +
-      `❌ Reply *nahi* → skip\n` +
+      `*📂 Topic:* ${rec.topic || 'General'}` +
+      ruling +
+      english + `\n\n` +
+      `*📝 Urdu Transcript:*\n${transcript}${transcript.length >= 180 ? '…' : ''}\n\n` +
+      `Send *Y* → forward this audio ✅\n` +
+      `Send *N* → reject ❌\n` +
+      `Send *A* → record your own 🎤\n` +
+      `Send any text → send as text answer 📝\n` +
       `🆔 _ref: ${qId}_`;
 
   } else if (topMatch && topMatch.score >= MED_CONFIDENCE && topMatch.record.audioFileName) {
     const rec = topMatch.record;
     audioFileName = rec.audioFileName;
     confidence    = topMatch.score;
-    transcript    = (rec.answerTranscript || rec.answerText || '').slice(0, 150);
+    transcript    = (rec.answerTranscriptProcessed || rec.answerTranscript || rec.answerText || '').slice(0, 150);
     const pct     = Math.round(confidence * 100);
+    const ruling  = rec.authenticRuling ? `\n*⚖️ Ruling:* ${rec.authenticRuling.slice(0, 150)}` : '';
+    const english = rec.englishTranslation ? `\n*🌐 Summary:* ${rec.englishTranslation.slice(0, 150)}` : '';
 
     adminNotice =
-      `⚠️ *POSSIBLE MATCH (${pct}% confidence)*\n\n` +
+      `⚠️ *POSSIBLE MATCH* (${pct}% confidence)\n\n` +
       `*❓ Question:*\n"${rawText}"\n` +
       `👤 _${senderName}_\n\n` +
-      `*🎙️ Closest audio:* \`${audioFileName}\`\n\n` +
+      `*🎙️ Closest audio:* \`${audioFileName}\`\n` +
+      `*📂 Topic:* ${rec.topic || 'General'}` +
+      ruling +
+      english + `\n\n` +
       `*📝 Preview:*\n${transcript}${transcript.length >= 150 ? '…' : ''}\n\n` +
-      `✅ *thik hai* → send this audio\n` +
-      `🎤 Or record your own voice answer\n` +
-      `❌ *nahi* → discard\n` +
+      `*Y* → send | *N* → reject | *A* → record | text → send as text\n` +
       `🆔 _ref: ${qId}_`;
 
   } else {
     adminNotice =
-      `🆕 *NEW QUESTION — NO MATCH*\n\n` +
+      `🆕 *NEW QUESTION — NO KB MATCH*\n\n` +
       `*❓ Question:*\n"${rawText}"\n` +
       `👤 _${senderName}_\n\n` +
-      `_No historical fatwa audio found._\n\n` +
-      `🎤 Please record a voice answer — it will be forwarded automatically.\n` +
+      `_No historical fatwa audio found in the database._\n\n` +
+      `*A* → record voice answer 🎤\n` +
+      `Send any text → send as text reply 📝\n` +
       `🆔 _ref: ${qId}_`;
   }
 

@@ -85,14 +85,25 @@ export async function embedQuestion(text: string): Promise<number[]> {
 export interface FatawaRecord {
   id: string;
   question: string;
+  questionExpanded?: string;
   questionLang: string;
   topic: string;
   answerText: string;
   answerTranscript: string;
+  answerTranscriptProcessed?: string;
   audioFile: string;          // GCS path: gs://wabot-fatawa-audio/filename.opus
   audioFileName: string;      // just the filename: PTT-xxx.opus
   confidence: number;
+  accuracyLabel?: string;
   replyMode: 'audio' | 'text';
+  // v3 Islamic ruling fields (verified from internet cross-reference)
+  authenticRuling?: string;   // e.g. "Fragrance forbidden in Ihram (Quran 2:197)"
+  rulingKeyPoints?: string;   // key points as newline-separated text
+  // Multilingual augmentation
+  romanUrduTranscript?: string;
+  englishTranslation?: string;
+  questionVariants?: string;
+  combinedSearchText?: string;
   keywords: string[];
   embedding?: number[];       // stored for search, optional on retrieval
 }
