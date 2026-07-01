@@ -346,6 +346,103 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ── GET /api/kb or /api/kb/:id — list / get single KB record ────────────────
+  if (url.startsWith('/api/kb') && method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    try {
+      const parsed = new URL(url, 'http://localhost');
+      const docId  = parsed.pathname.replace('/api/kb', '').replace(/^\//, '');
+      const { getFirestore } = await import('firebase-admin/firestore');
+      const db = getFirestore();
+
+      if (docId) {
+        // Single record
+        const doc = await db.collection('_fatawa_kb').doc(docId).get();
+        if (!doc.exists) { res.end(JSON.stringify({ ok: false, error: 'Not found' })); return; }
+        const d = doc.data() as any;
+        res.end(JSON.stringify({ ok: true, record: { ...d, embedding: undefined } }));
+        return;
+      }
+
+      // List with search/filter/pagination
+      const q     = (parsed.searchParams.get('q') || '').toLowerCase();
+      const topic = parsed.searchParams.get('topic') || '';
+      const page  = parseInt(parsed.searchParams.get('page') || '1', 10);
+      const limit = parseInt(parsed.searchParams.get('limit') || '20', 10);
+
+      let query: FirebaseFirestore.Query = db.collection('_fatawa_kb').orderBy('id').limit(650);
+      if (topic) query = db.collection('_fatawa_kb').where('topic', '==', topic).limit(650);
+
+      const snap = await query.get();
+      let docs = snap.docs.map(d => {
+        const data = d.data() as any;
+        return {
+          id: data.id, question: data.question, questionLang: data.questionLang,
+          topic: data.topic, replyMode: data.replyMode, audioFileName: data.audioFileName,
+          confidence: data.confidence, accuracyLabel: data.accuracyLabel,
+          authenticRuling: data.authenticRuling, answerText: data.answerText,
+          answerTranscript: data.answerTranscript, englishTranslation: data.englishTranslation,
+          romanUrduTranscript: data.romanUrduTranscript, rulingKeyPoints: data.rulingKeyPoints,
+          keywords: data.keywords, v3ingested: data.v3ingested,
+        };
+      });
+      if (q) docs = docs.filter(d =>
+        (d.question||'').toLowerCase().includes(q) || (d.answerText||'').toLowerCase().includes(q) ||
+        (d.answerTranscript||'').toLowerCase().includes(q) || (d.authenticRuling||'').toLowerCase().includes(q) ||
+        (d.topic||'').toLowerCase().includes(q) || (d.audioFileName||'').toLowerCase().includes(q),
+      );
+      const topicCounts: Record<string, number> = {};
+      snap.docs.forEach(d => { const t = (d.data() as any).topic || '?'; topicCounts[t] = (topicCounts[t] || 0) + 1; });
+      const total = docs.length;
+      res.end(JSON.stringify({ ok: true, items: docs.slice((page-1)*limit, page*limit), total, page, limit, topicCounts }));
+    } catch (err) { res.end(JSON.stringify({ ok: false, items: [], total: 0, error: String(err) })); }
+    return;
+  }
+
+  // ── PUT /api/kb/:id — edit a KB record ───────────────────────────────────────
+  if (url.startsWith('/api/kb/') && method === 'PUT') {
+    const docId = url.split('/api/kb/')[1];
+    let body = '';
+    req.on('data', (c) => body += c);
+    req.on('end', async () => {
+      try {
+        const u = JSON.parse(body);
+        const { getFirestore } = await import('firebase-admin/firestore');
+        await getFirestore().collection('_fatawa_kb').doc(docId).update({
+          question: u.question, topic: u.topic, answerText: u.answerText,
+          answerTranscript: u.answerTranscript, authenticRuling: u.authenticRuling,
+          rulingKeyPoints: u.rulingKeyPoints, confidence: u.confidence,
+          accuracyLabel: u.accuracyLabel, editedAt: new Date().toISOString(), editedVia: 'dashboard',
+        });
+        const { clearKbCache } = await import('./services/fatawa-kb.service');
+        clearKbCache();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: String(err) }));
+      }
+    });
+    return;
+  }
+
+  // ── DELETE /api/kb/:id — delete a KB record ─────────────────────────────────
+  if (url.startsWith('/api/kb/') && method === 'DELETE') {
+    const docId = url.split('/api/kb/')[1];
+    try {
+      const { getFirestore } = await import('firebase-admin/firestore');
+      await getFirestore().collection('_fatawa_kb').doc(docId).delete();
+      const { clearKbCache } = await import('./services/fatawa-kb.service');
+      clearKbCache();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: String(err) }));
+    }
+    return;
+  }
+
   // ── GET /api/pending — list pending questions awaiting admin approval ────────
   if (url === '/api/pending' && method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });

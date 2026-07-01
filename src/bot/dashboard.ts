@@ -212,6 +212,71 @@ input,textarea,select{font-family:var(--font);}
 .stat-dot.ok{background:var(--green);}
 .stat-dot.warn{background:var(--amber);}
 .stat-dot.err{background:var(--red);}
+
+/* ─────────────────────────────────────────────────────────────────────
+   KNOWLEDGE BASE TAB
+───────────────────────────────────────────────────────────────────── */
+.kb-layout{flex:1;display:grid;grid-template-columns:200px 1fr;overflow:hidden;}
+.kb-sidebar{background:var(--surface);border-right:1px solid var(--border);overflow-y:auto;padding:12px 8px;}
+.kb-sidebar-title{font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;padding:4px 8px 8px;}
+.kb-topic-btn{width:100%;text-align:left;background:none;border:none;color:var(--text);font-size:.82rem;
+  padding:6px 10px;border-radius:7px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;transition:.12s;}
+.kb-topic-btn:hover{background:var(--surface2);}
+.kb-topic-btn.active{background:var(--green-bg);color:var(--green);font-weight:600;}
+.kb-topic-cnt{font-size:.7rem;color:var(--muted);background:var(--surface2);padding:1px 7px;border-radius:10px;}
+.kb-main{display:flex;flex-direction:column;overflow:hidden;}
+.kb-toolbar{display:flex;align-items:center;gap:8px;padding:10px 14px;
+  border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;flex-wrap:wrap;}
+.kb-search{flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);
+  border-radius:8px;color:var(--text);padding:7px 12px;font-size:.83rem;outline:none;font-family:var(--font);}
+.kb-search:focus{border-color:var(--green);}
+.kb-count{font-size:.78rem;color:var(--muted);white-space:nowrap;}
+.kb-table-wrap{flex:1;overflow-y:auto;}
+.kb-table{width:100%;border-collapse:collapse;font-size:.82rem;}
+.kb-table th{position:sticky;top:0;background:var(--surface);padding:8px 12px;text-align:left;
+  font-size:.72rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;
+  border-bottom:1px solid var(--border);z-index:1;}
+.kb-table td{padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:top;
+  max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.kb-table tr:hover td{background:var(--surface2);cursor:pointer;}
+.kb-q{max-width:260px;}
+.kb-ruling{max-width:200px;}
+.kb-conf-pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:.7rem;font-weight:600;}
+.kb-conf-high{background:var(--green-bg);color:var(--green);}
+.kb-conf-med{background:var(--amber-bg);color:var(--amber);}
+.kb-conf-low{background:var(--red-bg);color:var(--red);}
+.kb-audio-chip{display:inline-flex;align-items:center;gap:4px;background:var(--blue-bg);
+  color:var(--blue);font-size:.68rem;padding:1px 7px;border-radius:8px;border:1px solid #1e3a5f;}
+.kb-pagination{display:flex;align-items:center;gap:8px;padding:8px 14px;
+  border-top:1px solid var(--border);background:var(--surface);flex-shrink:0;font-size:.8rem;}
+.kb-pagination button{padding:4px 12px;border-radius:6px;border:1px solid var(--border);
+  background:var(--surface2);color:var(--text);cursor:pointer;font-size:.78rem;}
+.kb-pagination button:disabled{opacity:.35;cursor:not-allowed;}
+/* Modal */
+.kb-modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1000;display:flex;
+  align-items:center;justify-content:center;backdrop-filter:blur(4px);animation:fadeIn .15s;}
+@keyframes fadeIn{from{opacity:0;}}
+.kb-modal{background:var(--surface);border:1px solid var(--border2);border-radius:14px;
+  width:min(680px,95vw);max-height:90vh;display:flex;flex-direction:column;overflow:hidden;
+  box-shadow:0 20px 60px rgba(0,0,0,.6);}
+.kb-modal-hdr{display:flex;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);
+  flex-shrink:0;}
+.kb-modal-hdr h3{font-size:1rem;font-weight:700;flex:1;}
+.kb-modal-close{background:none;border:none;color:var(--muted);font-size:1.3rem;cursor:pointer;line-height:1;
+  padding:2px 6px;border-radius:4px;}
+.kb-modal-close:hover{background:var(--surface2);color:var(--text);}
+.kb-modal-body{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:14px;}
+.kb-field{display:flex;flex-direction:column;gap:5px;}
+.kb-field label{font-size:.72rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}
+.kb-field input,.kb-field textarea,.kb-field select{background:var(--surface2);border:1px solid var(--border);
+  border-radius:8px;color:var(--text);padding:8px 10px;font-size:.83rem;font-family:var(--font);outline:none;}
+.kb-field input:focus,.kb-field textarea:focus,.kb-field select:focus{border-color:var(--green);}
+.kb-field textarea{resize:vertical;min-height:70px;line-height:1.5;}
+.kb-field .kb-readonly{background:var(--bg);color:var(--muted);cursor:default;}
+.kb-modal-footer{display:flex;align-items:center;gap:8px;padding:14px 20px;
+  border-top:1px solid var(--border);flex-shrink:0;}
+.kb-modal-footer .btn{min-width:100px;justify-content:center;}
+.kb-modal-status{flex:1;font-size:.78rem;color:var(--muted);}
 </style>
 </head>
 <body>
@@ -233,6 +298,7 @@ input,textarea,select{font-family:var(--font);}
       <button class="tab" onclick="switchTab('approvals')" id="tab-approvals">
         ✅ Approvals<span class="badge" id="pending-badge" style="display:none">0</span>
       </button>
+      <button class="tab" onclick="switchTab('kb')" id="tab-kb">🗄️ Knowledge Base</button>
     </div>
   </div>
 
@@ -378,6 +444,129 @@ input,textarea,select{font-family:var(--font);}
       </div>
     </div>
 
+    <!-- ═══════════════════════════════════════════════
+         KNOWLEDGE BASE TAB
+    ═══════════════════════════════════════════════ -->
+    <div class="panel" id="panel-kb">
+      <div class="kb-layout">
+        <!-- Sidebar: topic filters -->
+        <div class="kb-sidebar">
+          <div class="kb-sidebar-title">Topics</div>
+          <button class="kb-topic-btn active" id="kbtopic-ALL" onclick="kbSetTopic('')">📚 All <span class="kb-topic-cnt" id="kb-cnt-ALL">—</span></button>
+          <div id="kb-topic-list"></div>
+        </div>
+        <!-- Main area -->
+        <div class="kb-main">
+          <div class="kb-toolbar">
+            <input class="kb-search" id="kb-search" placeholder="🔍 Search questions, rulings, audio…" oninput="kbOnSearch()">
+            <button class="btn btn-ghost" style="padding:6px 12px;font-size:.78rem;" onclick="kbLoad()">🔄 Refresh</button>
+            <span class="kb-count" id="kb-total-lbl">Loading…</span>
+          </div>
+          <div class="kb-table-wrap">
+            <table class="kb-table">
+              <thead>
+                <tr>
+                  <th style="width:36px">#</th>
+                  <th style="width:280px">Question</th>
+                  <th style="width:90px">Topic</th>
+                  <th style="width:70px">Lang</th>
+                  <th style="width:80px">Confidence</th>
+                  <th style="width:160px">Islamic Ruling</th>
+                  <th style="width:140px">Audio File</th>
+                  <th style="width:70px">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="kb-tbody"></tbody>
+            </table>
+          </div>
+          <div class="kb-pagination">
+            <button id="kb-prev" onclick="kbPage(-1)" disabled>← Prev</button>
+            <span id="kb-page-lbl" style="flex:1;text-align:center;color:var(--muted);">Page 1</span>
+            <button id="kb-next" onclick="kbPage(1)">Next →</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- KB Edit Modal -->
+    <div class="kb-modal-bg" id="kb-modal" style="display:none;" onclick="kbModalClose(event)">
+      <div class="kb-modal" onclick="event.stopPropagation()">
+        <div class="kb-modal-hdr">
+          <h3 id="kb-modal-title">Edit Record</h3>
+          <button class="kb-modal-close" onclick="kbCloseModal()">✕</button>
+        </div>
+        <div class="kb-modal-body">
+          <input type="hidden" id="kb-edit-id">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div class="kb-field">
+              <label>Record ID</label>
+              <input type="text" id="kb-edit-id-disp" class="kb-readonly" readonly>
+            </div>
+            <div class="kb-field">
+              <label>Topic</label>
+              <select id="kb-edit-topic">
+                <option>GENERAL</option><option>IHRAM</option><option>TAWAF</option>
+                <option>SAEE</option><option>ARAFAT</option><option>MINA</option>
+                <option>JAMARAT</option><option>QURBANI</option><option>HALQ</option>
+                <option>SALAH</option><option>UMRAH</option><option>MADINAH</option>
+                <option>MENSTRUATION</option><option>HAIZ</option><option>WUDU</option>
+              </select>
+            </div>
+          </div>
+          <div class="kb-field">
+            <label>Question (Original)</label>
+            <textarea id="kb-edit-q" rows="3"></textarea>
+          </div>
+          <div class="kb-field">
+            <label>⚖️ Authentic Islamic Ruling (verified)</label>
+            <textarea id="kb-edit-ruling" rows="2"></textarea>
+          </div>
+          <div class="kb-field">
+            <label>📋 Ruling Key Points (one per line)</label>
+            <textarea id="kb-edit-keypoints" rows="4"></textarea>
+          </div>
+          <div class="kb-field">
+            <label>📝 Answer Text (text reply)</label>
+            <textarea id="kb-edit-anstext" rows="3"></textarea>
+          </div>
+          <div class="kb-field">
+            <label>🎙️ Urdu Transcript (of audio answer)</label>
+            <textarea id="kb-edit-transcript" rows="3" dir="rtl"></textarea>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div class="kb-field">
+              <label>🎵 Audio File (GCS filename)</label>
+              <input type="text" id="kb-edit-audio" class="kb-readonly" readonly placeholder="(linked from GCS)">
+            </div>
+            <div class="kb-field">
+              <label>🌐 English Translation (AI-generated)</label>
+              <input type="text" id="kb-edit-english" class="kb-readonly" readonly>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div class="kb-field">
+              <label>Confidence (0.0–1.0)</label>
+              <input type="number" id="kb-edit-conf" min="0" max="1" step="0.01">
+            </div>
+            <div class="kb-field">
+              <label>Accuracy Label</label>
+              <input type="text" id="kb-edit-label">
+            </div>
+          </div>
+          <div class="kb-field">
+            <label>🔑 Keywords (read-only)</label>
+            <input type="text" id="kb-edit-keywords" class="kb-readonly" readonly>
+          </div>
+        </div>
+        <div class="kb-modal-footer">
+          <button class="btn btn-red" onclick="kbDelete()" style="margin-right:auto;">🗑️ Delete</button>
+          <span class="kb-modal-status" id="kb-modal-st"></span>
+          <button class="btn btn-ghost" onclick="kbCloseModal()">Cancel</button>
+          <button class="btn btn-green" onclick="kbSave()">💾 Save Changes</button>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <!-- ── Status bar ── -->
@@ -409,11 +598,12 @@ const S = {
 // TAB SWITCHING
 // ═══════════════════════════════════════════════════════════════════
 function switchTab(name) {
-  ['setup','monitor','approvals'].forEach(t => {
+  ['setup','monitor','approvals','kb'].forEach(t => {
     document.getElementById('tab-' + t).classList.toggle('active', t === name);
     document.getElementById('panel-' + t).classList.toggle('active', t === name);
   });
   if (name === 'approvals') loadPending();
+  if (name === 'kb') kbLoad();
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -826,14 +1016,194 @@ function timeAgo(ts) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// KNOWLEDGE BASE TAB
+// ═══════════════════════════════════════════════════════════════════
+const KB = {
+  items: [], total: 0, page: 1, limit: 20,
+  topic: '', query: '', searchTimer: null,
+};
+
+async function kbLoad() {
+  document.getElementById('kb-total-lbl').textContent = 'Loading…';
+  document.getElementById('kb-tbody').innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted);">Loading…</td></tr>';
+  try {
+    const params = new URLSearchParams({ page: KB.page, limit: KB.limit });
+    if (KB.topic) params.set('topic', KB.topic);
+    if (KB.query) params.set('q', KB.query);
+    const r = await fetch('/api/kb?' + params);
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Load failed');
+    KB.items = d.items;
+    KB.total = d.total;
+    kbRenderSidebar(d.topicCounts);
+    kbRenderTable();
+  } catch(e) {
+    document.getElementById('kb-tbody').innerHTML = '<tr><td colspan="8" style="color:var(--red);padding:16px;">' + esc(e.message) + '</td></tr>';
+  }
+}
+
+function kbRenderSidebar(topicCounts) {
+  document.getElementById('kb-cnt-ALL').textContent = Object.values(topicCounts).reduce((a,b) => a+b, 0);
+  const topics = Object.entries(topicCounts).sort((a,b) => b[1]-a[1]);
+  const topicEmojis = { TAWAF:'🕋', IHRAM:'🤍', JAMARAT:'🪨', QURBANI:'🐑', SALAH:'🙏', MINA:'⛺', ARAFAT:'🌄', SAEE:'🚶', HALQ:'✂️', UMRAH:'🌙', MADINAH:'🕌', MENSTRUATION:'🩺', HAIZ:'🩺', WUDU:'💧', GENERAL:'📁' };
+  document.getElementById('kb-topic-list').innerHTML = topics.map(([t,c]) =>
+    '<button class="kb-topic-btn' + (KB.topic===t?' active':'') + '" id="kbtopic-' + t + '" onclick="kbSetTopic(\'' + t + '\')">' +
+    (topicEmojis[t]||'📂') + ' ' + t + '<span class="kb-topic-cnt">' + c + '</span></button>'
+  ).join('');
+}
+
+function kbRenderTable() {
+  const tb = document.getElementById('kb-tbody');
+  const total = document.getElementById('kb-total-lbl');
+  total.textContent = KB.total + ' records';
+  document.getElementById('kb-page-lbl').textContent = 'Page ' + KB.page + ' of ' + Math.max(1, Math.ceil(KB.total / KB.limit));
+  document.getElementById('kb-prev').disabled = KB.page <= 1;
+  document.getElementById('kb-next').disabled = KB.page * KB.limit >= KB.total;
+
+  if (!KB.items.length) {
+    tb.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--muted);">No records found</td></tr>';
+    return;
+  }
+
+  const offset = (KB.page - 1) * KB.limit;
+  tb.innerHTML = KB.items.map((rec, i) => {
+    const conf = rec.confidence || 0;
+    const confCls = conf >= 0.85 ? 'kb-conf-high' : conf >= 0.65 ? 'kb-conf-med' : 'kb-conf-low';
+    const confPct = Math.round(conf * 100) + '%';
+    const audio = rec.audioFileName
+      ? '<span class="kb-audio-chip">🎵 ' + esc(rec.audioFileName.slice(0,18)) + '</span>'
+      : '<span style="color:var(--muted);font-size:.72rem;">text only</span>';
+    const ruling = rec.authenticRuling
+      ? esc(rec.authenticRuling.slice(0,50)) + (rec.authenticRuling.length > 50 ? '…' : '')
+      : '<span style="color:var(--muted)">—</span>';
+    return '<tr onclick="kbOpen(\'' + esc(rec.id) + '\')">' +
+      '<td style="color:var(--muted);font-size:.72rem;">' + (offset + i + 1) + '</td>' +
+      '<td class="kb-q" title="' + esc(rec.question||'') + '">' + esc((rec.question||'').slice(0,70)) + '</td>' +
+      '<td><span style="font-size:.72rem;font-weight:600;">' + esc(rec.topic||'?') + '</span></td>' +
+      '<td style="font-size:.72rem;color:var(--muted);">' + esc(rec.questionLang||'?') + '</td>' +
+      '<td><span class="kb-conf-pill ' + confCls + '">' + confPct + '</span></td>' +
+      '<td class="kb-ruling" title="' + esc(rec.authenticRuling||'') + '">' + ruling + '</td>' +
+      '<td>' + audio + '</td>' +
+      '<td><button class="btn btn-ghost" style="padding:3px 10px;font-size:.74rem;" onclick="event.stopPropagation();kbOpen(\'' + esc(rec.id) + '\')">✏️ Edit</button></td>' +
+      '</tr>';
+  }).join('');
+}
+
+function kbSetTopic(t) {
+  KB.topic = t;
+  KB.page = 1;
+  // Update active state
+  document.querySelectorAll('.kb-topic-btn').forEach(b => b.classList.remove('active'));
+  const activeId = t ? 'kbtopic-' + t : 'kbtopic-ALL';
+  const btn = document.getElementById(activeId);
+  if (btn) btn.classList.add('active');
+  kbLoad();
+}
+
+function kbPage(dir) {
+  KB.page += dir;
+  kbLoad();
+}
+
+function kbOnSearch() {
+  clearTimeout(KB.searchTimer);
+  KB.searchTimer = setTimeout(() => {
+    KB.query = document.getElementById('kb-search').value.trim();
+    KB.page = 1;
+    kbLoad();
+  }, 350);
+}
+
+// ── Open edit modal ───────────────────────────────────────────────
+async function kbOpen(id) {
+  document.getElementById('kb-modal-st').textContent = 'Loading…';
+  document.getElementById('kb-modal').style.display = 'flex';
+  document.getElementById('kb-modal-title').textContent = '✏️ Edit: ' + id;
+  try {
+    const r = await fetch('/api/kb/' + id);
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Not found');
+    const rec = d.record;
+    document.getElementById('kb-edit-id').value         = rec.id || id;
+    document.getElementById('kb-edit-id-disp').value    = rec.id || id;
+    document.getElementById('kb-edit-q').value          = rec.question || '';
+    document.getElementById('kb-edit-ruling').value     = rec.authenticRuling || '';
+    document.getElementById('kb-edit-keypoints').value  = rec.rulingKeyPoints || '';
+    document.getElementById('kb-edit-anstext').value    = rec.answerText || '';
+    document.getElementById('kb-edit-transcript').value = rec.answerTranscript || '';
+    document.getElementById('kb-edit-audio').value      = rec.audioFileName || '';
+    document.getElementById('kb-edit-english').value    = rec.englishTranslation || '';
+    document.getElementById('kb-edit-conf').value       = rec.confidence ?? '';
+    document.getElementById('kb-edit-label').value      = rec.accuracyLabel || '';
+    document.getElementById('kb-edit-keywords').value   = (rec.keywords || []).join(', ');
+    // Set topic dropdown
+    const sel = document.getElementById('kb-edit-topic');
+    const topicVal = (rec.topic||'GENERAL').toUpperCase();
+    for (let i=0;i<sel.options.length;i++) { if (sel.options[i].value===topicVal||sel.options[i].text===topicVal) { sel.selectedIndex=i; break; } }
+    document.getElementById('kb-modal-st').textContent = '';
+  } catch(e) {
+    document.getElementById('kb-modal-st').textContent = '❌ ' + e.message;
+  }
+}
+
+async function kbSave() {
+  const id = document.getElementById('kb-edit-id').value;
+  const st = document.getElementById('kb-modal-st');
+  st.textContent = '⏳ Saving…'; st.style.color = 'var(--muted)';
+  try {
+    const body = {
+      question:        document.getElementById('kb-edit-q').value,
+      topic:           document.getElementById('kb-edit-topic').value,
+      answerText:      document.getElementById('kb-edit-anstext').value,
+      answerTranscript:document.getElementById('kb-edit-transcript').value,
+      authenticRuling: document.getElementById('kb-edit-ruling').value,
+      rulingKeyPoints: document.getElementById('kb-edit-keypoints').value,
+      confidence:      parseFloat(document.getElementById('kb-edit-conf').value) || 0,
+      accuracyLabel:   document.getElementById('kb-edit-label').value,
+    };
+    const r = await fetch('/api/kb/' + id, {
+      method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Save failed');
+    st.style.color = 'var(--green)'; st.textContent = '✅ Saved!';
+    setTimeout(() => { kbCloseModal(); kbLoad(); }, 800);
+  } catch(e) {
+    st.style.color = 'var(--red)'; st.textContent = '❌ ' + e.message;
+  }
+}
+
+async function kbDelete() {
+  const id = document.getElementById('kb-edit-id').value;
+  if (!confirm('Delete record ' + id + '? This cannot be undone.')) return;
+  const st = document.getElementById('kb-modal-st');
+  st.textContent = '⏳ Deleting…'; st.style.color = 'var(--amber)';
+  try {
+    const r = await fetch('/api/kb/' + id, { method: 'DELETE' });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Delete failed');
+    kbCloseModal(); kbLoad();
+  } catch(e) {
+    st.style.color = 'var(--red)'; st.textContent = '❌ ' + e.message;
+  }
+}
+
+function kbCloseModal() {
+  document.getElementById('kb-modal').style.display = 'none';
+}
+function kbModalClose(e) {
+  if (e.target.id === 'kb-modal') kbCloseModal();
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════════════════════
 initSettings();
 connectSSE();
 loadDebug();
 loadPendingBadge();
-// Auto-refresh debug & pending badge every 30s
 setInterval(() => { loadDebug(); loadPendingBadge(); }, 30000);
+
 </script>
 </body>
 </html>`;
