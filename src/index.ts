@@ -513,6 +513,161 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ── POST /api/kb — create new KB record with Gemini embedding ────────────────
+  if (url === '/api/kb' && method === 'POST') {
+    let body = '';
+    req.on('data', (c) => body += c);
+    req.on('end', async () => {
+      try {
+        const input = JSON.parse(body);
+        if (!input.question || !input.topic) throw new Error('question and topic are required');
+        const GEMINI_KEY = process.env.GEMINI_API_KEY;
+        if (!GEMINI_KEY) throw new Error('GEMINI_API_KEY not set');
+        const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+        const docId = 'kb_' + Date.now();
+
+        // Helper: call Gemini generate
+        const callGemini = async (prompt: string) => {
+          const r = await fetch(`${GEMINI_BASE}/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 600, temperature: 0.15 } }),
+          });
+          const j = await r.json() as any;
+          return j.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? '';
+        };
+
+        // Helper: get embedding
+        const getEmbedding = async (text: string) => {
+          const r = await fetch(`${GEMINI_BASE}/models/gemini-embedding-001:embedContent?key=${GEMINI_KEY}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: 'models/gemini-embedding-001', content: { parts: [{ text: text.slice(0, 3000) }] }, outputDimensionality: 768 }),
+          });
+          const j = await r.json() as any;
+          return j.embedding?.values ?? [];
+        };
+
+        // Step 1: Generate multilingual augmentation
+        const augPrompt = `Fatawa specialist. Question: "${input.question.slice(0,150)}" Topic: ${input.topic}
+${input.answerTranscript ? 'Answer: "' + input.answerTranscript.slice(0,300) + '"' : ''}
+${input.authenticRuling ? 'Ruling: ' + input.authenticRuling.slice(0,150) : ''}
+Give THREE parts separated by ---:
+PART 1: Roman Urdu transliteration of answer:
+---
+PART 2: English answer summary (2-3 sentences):
+---
+PART 3: 5 WhatsApp question variants (1 per line):`;
+        const augText = await callGemini(augPrompt);
+        const parts = augText.split('---').map((p: string) => p.trim());
+        const romanUrdu = parts[0] || '';
+        const englishTranslation = parts[1] || '';
+        const questionVariants = parts[2] || '';
+
+        // Step 2: Build embed text
+        const embedText = [
+          input.question, input.authenticRuling || '', input.rulingKeyPoints || '',
+          `Topic: ${input.topic}`, romanUrdu, englishTranslation, questionVariants,
+          input.answerTranscript || input.answerText || '',
+        ].filter(Boolean).join('\n').slice(0, 3000);
+
+        // Step 3: Get embedding
+        const embedding = await getEmbedding(embedText);
+
+        // Step 4: Save to Firestore
+        const { getFirestore } = await import('firebase-admin/firestore');
+        const record = {
+          id: docId, question: input.question, questionLang: input.questionLang || 'English',
+          topic: input.topic, replyMode: input.audioFileName ? 'audio' : 'text',
+          audioFileName: input.audioFileName || '', audioFile: input.audioFileName ? `gs://${process.env.GCS_BUCKET_NAME || 'wabot-fatawa-audio'}/${input.audioFileName}` : '',
+          answerText: input.answerText || '', answerTranscript: input.answerTranscript || '',
+          authenticRuling: input.authenticRuling || '', rulingKeyPoints: input.rulingKeyPoints || '',
+          accuracyLabel: input.accuracyLabel || 'Dashboard Added', confidence: parseFloat(input.confidence) || 0.75,
+          romanUrduTranscript: romanUrdu, englishTranslation, questionVariants,
+          keywords: embedText.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter((w: string) => w.length > 2).slice(0, 30),
+          embedding, multilingualText: embedText.slice(0, 1000),
+          v3ingested: false, dashboardAdded: true, createdAt: new Date().toISOString(),
+        };
+        await getFirestore().collection('_fatawa_kb').doc(docId).set(record);
+        try { const { clearKbCache } = await import('./services/fatawa-kb.service'); clearKbCache(); } catch {}
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, id: docId, embedded: embedding.length > 0 }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: String(err) }));
+      }
+    });
+    return;
+  }
+
+  // ── POST /api/kb/:id/embed — re-embed an existing KB record ──────────────────
+  if (url.match(/^\/api\/kb\/[^/]+\/embed$/) && method === 'POST') {
+    const docId = url.split('/api/kb/')[1].replace('/embed', '');
+    try {
+      const GEMINI_KEY = process.env.GEMINI_API_KEY;
+      if (!GEMINI_KEY) throw new Error('GEMINI_API_KEY not set');
+      const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+      const { getFirestore } = await import('firebase-admin/firestore');
+      const doc = await getFirestore().collection('_fatawa_kb').doc(docId).get();
+      if (!doc.exists) throw new Error('Record not found');
+      const d = doc.data() as any;
+      const embedText = [d.question, d.authenticRuling, d.rulingKeyPoints, `Topic: ${d.topic}`,
+        d.romanUrduTranscript, d.englishTranslation, d.answerTranscript || d.answerText].filter(Boolean).join('\n').slice(0, 3000);
+      const r = await fetch(`${GEMINI_BASE}/models/gemini-embedding-001:embedContent?key=${GEMINI_KEY}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'models/gemini-embedding-001', content: { parts: [{ text: embedText }] }, outputDimensionality: 768 }),
+      });
+      const j = await r.json() as any;
+      const embedding = j.embedding?.values ?? [];
+      await getFirestore().collection('_fatawa_kb').doc(docId).update({ embedding, reembeddedAt: new Date().toISOString() });
+      try { const { clearKbCache } = await import('./services/fatawa-kb.service'); clearKbCache(); } catch {}
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, dims: embedding.length }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: String(err) }));
+    }
+    return;
+  }
+
+  // ── GET /api/analytics — KB statistics for dashboard charts ──────────────────
+  if (url === '/api/analytics' && method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=60' });
+    try {
+      const { getFirestore } = await import('firebase-admin/firestore');
+      const db = getFirestore();
+      const snap = await db.collection('_fatawa_kb')
+        .select('topic', 'questionLang', 'replyMode', 'confidence', 'accuracyLabel', 'v3ingested')
+        .limit(700).get();
+      const topicCounts: Record<string, number> = {};
+      const langCounts: Record<string, number> = {};
+      const confBuckets = { low: 0, med: 0, high: 0, vhigh: 0 };
+      let audioCount = 0, textCount = 0, v3Count = 0;
+      snap.docs.forEach(d => {
+        const data = d.data() as any;
+        const topic = data.topic || 'GENERAL';
+        topicCounts[topic] = (topicCounts[topic] || 0) + 1;
+        const lang = data.questionLang || 'Unknown';
+        langCounts[lang] = (langCounts[lang] || 0) + 1;
+        const conf = parseFloat(data.confidence) || 0;
+        if (conf >= 0.9) confBuckets.vhigh++;
+        else if (conf >= 0.8) confBuckets.high++;
+        else if (conf >= 0.65) confBuckets.med++;
+        else confBuckets.low++;
+        if (data.replyMode === 'audio') audioCount++; else textCount++;
+        if (data.v3ingested) v3Count++;
+      });
+      const [pendingSnap, totalKb] = await Promise.all([
+        db.collection('_fatawa_pending').where('status','==','pending').count().get(),
+        db.collection('_fatawa_kb').count().get(),
+      ]);
+      res.end(JSON.stringify({
+        ok: true, totalRecords: totalKb.data().count, audioRecords: audioCount, textRecords: textCount,
+        v3Records: v3Count, pendingApprovals: pendingSnap.data().count,
+        topicCounts, langCounts, confBuckets,
+      }));
+    } catch (err) { res.end(JSON.stringify({ ok: false, error: String(err) })); }
+    return;
+  }
+
   // ── GET /api/pending — list pending questions awaiting admin approval ────────
   if (url === '/api/pending' && method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
