@@ -1019,8 +1019,12 @@ function timeAgo(ts) {
 // KNOWLEDGE BASE TAB
 // ═══════════════════════════════════════════════════════════════════
 const KB = {
-  items: [], total: 0, page: 1, limit: 20,
+  items: [], total: -1, page: 1, limit: 20,
   topic: '', query: '', searchTimer: null,
+  nextCursor: '',
+  cursors: [''],   // cursors[0]=start, cursors[1]=after page1, etc.
+  topicCounts: {},
+  topicsLoaded: false,
 };
 
 async function kbLoad() {
@@ -1030,15 +1034,29 @@ async function kbLoad() {
     const params = new URLSearchParams({ page: KB.page, limit: KB.limit });
     if (KB.topic) params.set('topic', KB.topic);
     if (KB.query) params.set('q', KB.query);
+    // Use cursor for non-search navigation
+    const cursor = !KB.query && KB.cursors[KB.page - 1];
+    if (cursor) params.set('cursor', cursor);
     const r = await fetch('/api/kb?' + params);
     const d = await r.json();
     if (!d.ok) throw new Error(d.error || 'Load failed');
     KB.items = d.items;
     KB.total = d.total;
-    kbRenderSidebar(d.topicCounts);
+    KB.nextCursor = d.nextCursor || '';
+    // Store cursor for next page
+    if (d.nextCursor) KB.cursors[KB.page] = d.nextCursor;
+    // Only update sidebar on first load or topic change
+    if (d.topicCounts && Object.keys(d.topicCounts).length) {
+      KB.topicCounts = d.topicCounts;
+      KB.topicsLoaded = true;
+      kbRenderSidebar(d.topicCounts);
+    } else if (!KB.topicsLoaded) {
+      kbRenderSidebar({});
+    }
     kbRenderTable();
   } catch(e) {
     document.getElementById('kb-tbody').innerHTML = '<tr><td colspan="8" style="color:var(--red);padding:16px;">' + esc(e.message) + '</td></tr>';
+    document.getElementById('kb-total-lbl').textContent = 'Error';
   }
 }
 
@@ -1054,11 +1072,12 @@ function kbRenderSidebar(topicCounts) {
 
 function kbRenderTable() {
   const tb = document.getElementById('kb-tbody');
-  const total = document.getElementById('kb-total-lbl');
-  total.textContent = KB.total + ' records';
-  document.getElementById('kb-page-lbl').textContent = 'Page ' + KB.page + ' of ' + Math.max(1, Math.ceil(KB.total / KB.limit));
+  const totalLbl = document.getElementById('kb-total-lbl');
+  totalLbl.textContent = KB.total >= 0 ? KB.total + ' results' : KB.items.length + ' on this page';
+  const totalPages = KB.total >= 0 ? Math.max(1, Math.ceil(KB.total / KB.limit)) : '?';
+  document.getElementById('kb-page-lbl').textContent = 'Page ' + KB.page + (totalPages !== '?' ? ' of ' + totalPages : '');
   document.getElementById('kb-prev').disabled = KB.page <= 1;
-  document.getElementById('kb-next').disabled = KB.page * KB.limit >= KB.total;
+  document.getElementById('kb-next').disabled = !KB.nextCursor && (KB.total < 0 ? KB.items.length < KB.limit : KB.page * KB.limit >= KB.total);
 
   if (!KB.items.length) {
     tb.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--muted);">No records found</td></tr>';
@@ -1092,6 +1111,9 @@ function kbRenderTable() {
 function kbSetTopic(t) {
   KB.topic = t;
   KB.page = 1;
+  KB.cursors = [''];
+  KB.nextCursor = '';
+  KB.topicsLoaded = (t === '' && KB.topicsLoaded); // re-fetch counts on all-topics view
   // Update active state
   document.querySelectorAll('.kb-topic-btn').forEach(b => b.classList.remove('active'));
   const activeId = t ? 'kbtopic-' + t : 'kbtopic-ALL';
@@ -1101,7 +1123,8 @@ function kbSetTopic(t) {
 }
 
 function kbPage(dir) {
-  KB.page += dir;
+  if (dir > 0 && KB.nextCursor) KB.cursors[KB.page] = KB.nextCursor;
+  KB.page = Math.max(1, KB.page + dir);
   kbLoad();
 }
 
@@ -1110,8 +1133,10 @@ function kbOnSearch() {
   KB.searchTimer = setTimeout(() => {
     KB.query = document.getElementById('kb-search').value.trim();
     KB.page = 1;
+    KB.cursors = [''];
+    KB.nextCursor = '';
     kbLoad();
-  }, 350);
+  }, 400);
 }
 
 // ── Open edit modal ───────────────────────────────────────────────

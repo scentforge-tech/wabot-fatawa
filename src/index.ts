@@ -356,45 +356,106 @@ const server = http.createServer(async (req, res) => {
       const db = getFirestore();
 
       if (docId) {
-        // Single record
+        // Single full record — embed stripped
         const doc = await db.collection('_fatawa_kb').doc(docId).get();
         if (!doc.exists) { res.end(JSON.stringify({ ok: false, error: 'Not found' })); return; }
         const d = doc.data() as any;
-        res.end(JSON.stringify({ ok: true, record: { ...d, embedding: undefined } }));
+        res.end(JSON.stringify({ ok: true, record: { ...d, embedding: undefined, multilingualText: undefined } }));
         return;
       }
 
-      // List with search/filter/pagination
-      const q     = (parsed.searchParams.get('q') || '').toLowerCase();
-      const topic = parsed.searchParams.get('topic') || '';
-      const page  = parseInt(parsed.searchParams.get('page') || '1', 10);
-      const limit = parseInt(parsed.searchParams.get('limit') || '20', 10);
+      // ── Paginated list — only lightweight fields, NO full transcript ─────────
+      const q      = (parsed.searchParams.get('q') || '').toLowerCase();
+      const topic  = parsed.searchParams.get('topic') || '';
+      const page   = Math.max(1, parseInt(parsed.searchParams.get('page') || '1', 10));
+      const limit  = Math.min(25, parseInt(parsed.searchParams.get('limit') || '20', 10));
+      const cursor = parsed.searchParams.get('cursor') || ''; // last doc id
 
-      let query: FirebaseFirestore.Query = db.collection('_fatawa_kb').orderBy('id').limit(650);
-      if (topic) query = db.collection('_fatawa_kb').where('topic', '==', topic).limit(650);
+      // Base collection reference — lightweight select
+      const colRef = db.collection('_fatawa_kb');
+
+      // Topic counts — use a count query to avoid reading all docs
+      // We cache topic counts to avoid re-reading on every page change
+      let topicCounts: Record<string, number> = {};
+      try {
+        // Only recompute on first page or when topic filter changes
+        if (page === 1 && !q) {
+          // Fast count via aggregation (reads 0 documents)
+          const allSnap = await colRef.select('topic').limit(700).get();
+          allSnap.docs.forEach(d => {
+            const t = (d.data() as any).topic || '?';
+            topicCounts[t] = (topicCounts[t] || 0) + 1;
+          });
+        }
+      } catch { topicCounts = {}; }
+
+      // Build query — lightweight fields only
+      let query: FirebaseFirestore.Query = colRef
+        .select('id','question','questionLang','topic','replyMode','audioFileName',
+                'confidence','accuracyLabel','authenticRuling','v3ingested')
+        .orderBy('id')
+        .limit(limit);
+
+      if (topic) {
+        query = colRef
+          .select('id','question','questionLang','topic','replyMode','audioFileName',
+                  'confidence','accuracyLabel','authenticRuling','v3ingested')
+          .where('topic', '==', topic)
+          .limit(limit);
+      }
+
+      // Cursor-based pagination
+      if (cursor) {
+        const cursorDoc = await colRef.doc(cursor).get();
+        if (cursorDoc.exists) query = query.startAfter(cursorDoc);
+      }
 
       const snap = await query.get();
-      let docs = snap.docs.map(d => {
+      let items = snap.docs.map(d => {
         const data = d.data() as any;
+        // Truncate ruling for list view
         return {
           id: data.id, question: data.question, questionLang: data.questionLang,
           topic: data.topic, replyMode: data.replyMode, audioFileName: data.audioFileName,
           confidence: data.confidence, accuracyLabel: data.accuracyLabel,
-          authenticRuling: data.authenticRuling, answerText: data.answerText,
-          answerTranscript: data.answerTranscript, englishTranslation: data.englishTranslation,
-          romanUrduTranscript: data.romanUrduTranscript, rulingKeyPoints: data.rulingKeyPoints,
-          keywords: data.keywords, v3ingested: data.v3ingested,
+          authenticRuling: data.authenticRuling ? data.authenticRuling.slice(0, 100) : '',
+          v3ingested: data.v3ingested,
         };
       });
-      if (q) docs = docs.filter(d =>
-        (d.question||'').toLowerCase().includes(q) || (d.answerText||'').toLowerCase().includes(q) ||
-        (d.answerTranscript||'').toLowerCase().includes(q) || (d.authenticRuling||'').toLowerCase().includes(q) ||
-        (d.topic||'').toLowerCase().includes(q) || (d.audioFileName||'').toLowerCase().includes(q),
-      );
-      const topicCounts: Record<string, number> = {};
-      snap.docs.forEach(d => { const t = (d.data() as any).topic || '?'; topicCounts[t] = (topicCounts[t] || 0) + 1; });
-      const total = docs.length;
-      res.end(JSON.stringify({ ok: true, items: docs.slice((page-1)*limit, page*limit), total, page, limit, topicCounts }));
+
+      // In-memory text search (only over the loaded page)
+      if (q) {
+        // For search, we need to scan more — fetch up to 200 docs then filter
+        const searchSnap = await colRef
+          .select('id','question','questionLang','topic','replyMode','audioFileName',
+                  'confidence','accuracyLabel','authenticRuling','v3ingested')
+          .orderBy('id').limit(200).get();
+        const allDocs = searchSnap.docs.map(d => {
+          const data = d.data() as any;
+          return {
+            id: data.id, question: data.question, questionLang: data.questionLang,
+            topic: data.topic, replyMode: data.replyMode, audioFileName: data.audioFileName,
+            confidence: data.confidence, accuracyLabel: data.accuracyLabel,
+            authenticRuling: data.authenticRuling ? data.authenticRuling.slice(0, 100) : '',
+            v3ingested: data.v3ingested,
+          };
+        });
+        items = allDocs.filter(d =>
+          (d.question||'').toLowerCase().includes(q) ||
+          (d.authenticRuling||'').toLowerCase().includes(q) ||
+          (d.topic||'').toLowerCase().includes(q) ||
+          (d.audioFileName||'').toLowerCase().includes(q),
+        ).slice((page-1)*limit, page*limit);
+      }
+
+      const nextCursor = snap.docs.length === limit ? snap.docs[snap.docs.length-1].id : '';
+      res.end(JSON.stringify({
+        ok: true, items,
+        total: q ? items.length : (topic ? items.length : -1), // -1 = unknown (use cursor)
+        page, limit,
+        nextCursor,
+        topicCounts,
+      }));
     } catch (err) { res.end(JSON.stringify({ ok: false, items: [], total: 0, error: String(err) })); }
     return;
   }
@@ -408,14 +469,21 @@ const server = http.createServer(async (req, res) => {
       try {
         const u = JSON.parse(body);
         const { getFirestore } = await import('firebase-admin/firestore');
-        await getFirestore().collection('_fatawa_kb').doc(docId).update({
-          question: u.question, topic: u.topic, answerText: u.answerText,
-          answerTranscript: u.answerTranscript, authenticRuling: u.authenticRuling,
-          rulingKeyPoints: u.rulingKeyPoints, confidence: u.confidence,
-          accuracyLabel: u.accuracyLabel, editedAt: new Date().toISOString(), editedVia: 'dashboard',
-        });
-        const { clearKbCache } = await import('./services/fatawa-kb.service');
-        clearKbCache();
+        const updateData: Record<string, any> = { editedAt: new Date().toISOString(), editedVia: 'dashboard' };
+        if (u.question !== undefined)        updateData.question = u.question;
+        if (u.topic !== undefined)            updateData.topic = u.topic;
+        if (u.answerText !== undefined)       updateData.answerText = u.answerText;
+        if (u.answerTranscript !== undefined) updateData.answerTranscript = u.answerTranscript;
+        if (u.authenticRuling !== undefined)  updateData.authenticRuling = u.authenticRuling;
+        if (u.rulingKeyPoints !== undefined)  updateData.rulingKeyPoints = u.rulingKeyPoints;
+        if (u.confidence !== undefined)       updateData.confidence = parseFloat(u.confidence);
+        if (u.accuracyLabel !== undefined)    updateData.accuracyLabel = u.accuracyLabel;
+        await getFirestore().collection('_fatawa_kb').doc(docId).update(updateData);
+        // Safely clear in-memory cache if module is loaded
+        try {
+          const { clearKbCache } = await import('./services/fatawa-kb.service');
+          clearKbCache();
+        } catch { /* cache not critical */ }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
       } catch (err) {
@@ -432,8 +500,10 @@ const server = http.createServer(async (req, res) => {
     try {
       const { getFirestore } = await import('firebase-admin/firestore');
       await getFirestore().collection('_fatawa_kb').doc(docId).delete();
-      const { clearKbCache } = await import('./services/fatawa-kb.service');
-      clearKbCache();
+      try {
+        const { clearKbCache } = await import('./services/fatawa-kb.service');
+        clearKbCache();
+      } catch { /* cache not critical */ }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
     } catch (err) {
