@@ -56,6 +56,35 @@ export async function translateToEnglish(text: string): Promise<string> {
 }
 
 
+// ─── Conversation continuity ────────────────────────────────────────────────
+
+/**
+ * Classifies whether a new message from the same sender is a follow-up /
+ * clarification of their previous question, or an unrelated new question.
+ * Defaults to false (treat as new) on any classification failure — safer,
+ * since a wrongly-merged unrelated question is worse than two separate ones.
+ */
+export async function classifyFollowUp(previousQuestion: string, newMessage: string): Promise<boolean> {
+  const model = getModel();
+  const prompt =
+    `Two consecutive WhatsApp messages from the SAME person in a Hajj/Umrah Q&A group.\n\n` +
+    `Previous message: "${previousQuestion.slice(0, 300)}"\n` +
+    `New message: "${newMessage.slice(0, 300)}"\n\n` +
+    `Is the new message a follow-up, clarification, or continuation of the SAME question/topic ` +
+    `(e.g. adding detail, answering an implicit sub-question, rephrasing)? ` +
+    `Or is it an unrelated, independent NEW question/topic?\n\n` +
+    `Reply with exactly one word: "continuation" or "new".`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const text = result.response.text().trim().toLowerCase();
+    return text.startsWith('continuation');
+  } catch (err) {
+    logger.warn({ err }, 'Follow-up classification failed — treating as new question');
+    return false;
+  }
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface RawRecord {

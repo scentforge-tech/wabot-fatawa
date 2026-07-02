@@ -582,7 +582,10 @@ PART 3: 5 WhatsApp question variants (1 per line):`;
           authenticRuling: input.authenticRuling || '', rulingKeyPoints: input.rulingKeyPoints || '',
           accuracyLabel: input.accuracyLabel || 'Dashboard Added', confidence: parseFloat(input.confidence) || 0.75,
           romanUrduTranscript: romanUrdu, englishTranslation, questionVariants,
-          keywords: embedText.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter((w: string) => w.length > 2).slice(0, 30),
+          keywords: (await import('./services/fatawa-kb.service')).deriveMultilingualKeywords([
+            input.question, romanUrdu, englishTranslation, input.authenticRuling, input.rulingKeyPoints,
+            input.answerTranscript, input.answerText, input.topic,
+          ]),
           embedding, multilingualText: embedText.slice(0, 1000),
           v3ingested: false, dashboardAdded: true, createdAt: new Date().toISOString(),
         };
@@ -625,6 +628,40 @@ PART 3: 5 WhatsApp question variants (1 per line):`;
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: false, error: String(err) }));
     }
+    return;
+  }
+
+  // ── POST /api/kb/:id/upload-audio — attach an audio file to a KB record ──────
+  if (url.match(/^\/api\/kb\/[^/]+\/upload-audio$/) && method === 'POST') {
+    const docId = url.split('/api/kb/')[1].replace('/upload-audio', '');
+    let body = '';
+    req.on('data', (c) => body += c);
+    req.on('end', async () => {
+      try {
+        const { filename, dataBase64 } = JSON.parse(body);
+        if (!filename || !dataBase64) throw new Error('filename and dataBase64 are required');
+        const safeName = `kb-${docId}-${filename}`.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const buffer = Buffer.from(dataBase64, 'base64');
+        if (buffer.length < 100) throw new Error('Audio file is empty or too small');
+
+        const { uploadAudioBuffer, clearKbCache } = await import('./services/fatawa-kb.service');
+        await uploadAudioBuffer(buffer, safeName);
+
+        const { getFirestore } = await import('firebase-admin/firestore');
+        await getFirestore().collection('_fatawa_kb').doc(docId).update({
+          audioFileName: safeName,
+          audioFile: `gs://${process.env.GCS_BUCKET_NAME || 'wabot-fatawa-audio'}/${safeName}`,
+          replyMode: 'audio',
+        });
+        clearKbCache();
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, audioFileName: safeName }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: String(err) }));
+      }
+    });
     return;
   }
 
@@ -773,9 +810,17 @@ PART 3: 5 WhatsApp question variants (1 per line):`;
     req.on('data', (chunk) => body += chunk);
     req.on('end', async () => {
       try {
-        const { publicGroupJid, adminGroupJid } = JSON.parse(body);
+        const parsed = JSON.parse(body);
+        const { publicGroupJid, adminGroupJid, replyMode, autoReplyThreshold, answerDMs } = parsed;
         const { saveGroupSettings } = await import('./services/settings.service');
-        const saved = await saveGroupSettings({ publicGroupJid, adminGroupJid });
+        // Only forward fields that were actually provided (partial update).
+        const patch: Record<string, unknown> = {};
+        if (publicGroupJid !== undefined) patch.publicGroupJid = publicGroupJid;
+        if (adminGroupJid !== undefined) patch.adminGroupJid = adminGroupJid;
+        if (replyMode !== undefined) patch.replyMode = replyMode;
+        if (autoReplyThreshold !== undefined) patch.autoReplyThreshold = Number(autoReplyThreshold);
+        if (answerDMs !== undefined) patch.answerDMs = Boolean(answerDMs);
+        const saved = await saveGroupSettings(patch);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, settings: saved }));
       } catch (err) {

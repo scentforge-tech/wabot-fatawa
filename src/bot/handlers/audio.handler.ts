@@ -10,6 +10,9 @@ import { computeCompositeScore } from '../scoring';
 import { generateDraft } from '../draft';
 import { textToSpeech } from '../../services/tts.service';
 import { translateToEnglish } from '../../services/gemini.service';
+import { getGroupSettings } from '../../services/settings.service';
+import { searchFatawa } from '../../services/fatawa-kb.service';
+import { handleKbQuestion, MED_CONFIDENCE } from './text.handler';
 import { env } from '../../config/env';
 import logger from '../../config/logger';
 
@@ -79,7 +82,18 @@ export async function handleAudioMessage(
   const senderJid = msg.key.participant ?? msg.key.remoteJid ?? '';
   const publicGroupJid = msg.key.remoteJid ?? '';
 
+  // Resolve routing from live dashboard settings (env vars are blank in prod).
+  const settings = getGroupSettings();
+  const adminJid = settings.adminGroupJid || env.ADMIN_GROUP_JID || '';
+  const replyMode = settings.replyMode ?? 'approval';
+  const autoThreshold = settings.autoReplyThreshold ?? 0.72;
+
   logger.info({ msgId, senderJid }, 'Received audio message from public group');
+
+  if (!adminJid) {
+    logger.error({ msgId }, '❌ No admin group configured — open dashboard Setup tab and save groups');
+    return;
+  }
 
   // ── 1. Download audio ─────────────────────────────────────────────────────
   let audioBuffer: Buffer;
@@ -105,7 +119,7 @@ export async function handleAudioMessage(
     logger.info({ transcription, msgId }, 'Audio transcribed');
   } catch (err) {
     logger.error({ err, msgId }, 'Whisper transcription failed');
-    await sock.sendMessage(env.ADMIN_GROUP_JID, {
+    await sock.sendMessage(adminJid, {
       text: `⚠️ *Transcription Failed*\nMessage ID: ${msgId}\nThe system could not transcribe this voice note. Please review manually.`,
     });
     return;
@@ -114,6 +128,36 @@ export async function handleAudioMessage(
   if (!transcription || transcription.trim().length < 3) {
     logger.warn({ msgId }, 'Empty or too-short transcription — skipping');
     return;
+  }
+
+  // ── 2.5. Try the SAME fatawa KB used for typed questions first ────────────
+  // If the pilgrim's voice question matches an existing Sheikh recording,
+  // treat it exactly like a typed question (real audio + citations + normal
+  // approval flow) instead of synthesizing a brand-new AI voice answer below.
+  try {
+    const searchTextForKb = await translateToEnglish(transcription);
+    const kbMatches = await searchFatawa(searchTextForKb, { topN: 1, threshold: MED_CONFIDENCE });
+    const kbTopMatch = kbMatches[0];
+    if (kbTopMatch && kbTopMatch.record.audioFileName) {
+      logger.info(
+        { msgId, score: kbTopMatch.score, file: kbTopMatch.record.audioFileName },
+        '🎯 Voice question matched existing KB audio — using it instead of synthetic draft',
+      );
+      await handleKbQuestion(sock, msg, {
+        displayText: transcription,
+        searchText: searchTextForKb,
+        senderJid,
+        senderName: msg.pushName ?? senderJid.split('@')[0],
+        publicGroupJid,
+        adminGroupJid: adminJid,
+        settings,
+        preSearched: kbTopMatch,
+      });
+      return;
+    }
+    logger.info({ msgId }, 'No existing KB audio match for voice question — falling back to draft pipeline');
+  } catch (err) {
+    logger.warn({ err, msgId }, 'KB pre-check for voice question failed — falling back to draft pipeline');
   }
 
   // ── 3–7. Embed → Match → Score → Draft (with graceful fallback) ─────────────
@@ -147,7 +191,7 @@ export async function handleAudioMessage(
   } catch (err) {
     // Firestore not set up yet, or embedding failed — send transcript to admin for manual review
     logger.warn({ err, msgId }, 'Pipeline error (embedding/DB) — falling back to manual review');
-    await sock.sendMessage(env.ADMIN_GROUP_JID, {
+    await sock.sendMessage(adminJid, {
       text:
         `🎤 *NEW PILGRIM QUESTION*\n\n` +
         `"${transcription}"\n\n` +
@@ -159,7 +203,7 @@ export async function handleAudioMessage(
   // ── 7. Route based on draft type ──────────────────────────────────────────
   if (draft.type === 'FLAG_FOR_MANUAL_REVIEW') {
     logger.info({ msgId }, 'Sending FLAG_FOR_MANUAL_REVIEW to admin group');
-    await sock.sendMessage(env.ADMIN_GROUP_JID, {
+    await sock.sendMessage(adminJid, {
       text:
         `🚩 *FLAG FOR MANUAL REVIEW*\n\n` +
         `*Original Question (Transcribed):*\n"${transcription}"\n\n` +
@@ -194,7 +238,7 @@ export async function handleAudioMessage(
   } catch (err) {
     logger.error({ err, msgId }, 'TTS conversion failed — sending text fallback to admin');
     // Send draft as text — Shaikh can approve by replying 'thik hai' / 'approve'
-    await sock.sendMessage(env.ADMIN_GROUP_JID, {
+    await sock.sendMessage(adminJid, {
       text:
         `📝 *DRAFT ANSWER — AWAITING APPROVAL*\n\n` +
         `*Pilgrim asked:* "${transcription}"\n\n` +
@@ -204,6 +248,38 @@ export async function handleAudioMessage(
         `🎤 Or record a voice answer — it will be forwarded directly.`,
     });
     return;
+  }
+
+  // ── 9.5 Auto-reply (if configured) ───────────────────────────────────────
+  // In 'auto'/'hybrid' modes, a high-confidence (DIRECT) draft above the
+  // threshold is sent straight to the pilgrim instead of the Sheikh.
+  if (
+    replyMode !== 'approval' &&
+    draft.type === 'DIRECT' &&
+    draft.compositeScore >= autoThreshold
+  ) {
+    try {
+      await sock.sendMessage(
+        publicGroupJid,
+        { audio: ttsBuffer, mimetype: 'audio/ogg; codecs=opus', ptt: true },
+        { quoted: msg },
+      );
+      pendingDrafts.delete(draftCacheKey);
+      logger.info({ msgId, score: draft.compositeScore, mode: replyMode }, '🤖 Auto-replied audio to user');
+
+      if (replyMode === 'hybrid') {
+        await sock.sendMessage(adminJid, {
+          text:
+            `🤖 *AUTO-REPLIED* (voice, ${(draft.compositeScore * 100).toFixed(0)}%)\n\n` +
+            `*Q:* "${transcription}"\n\n` +
+            `_Answer sent automatically — no action needed._`,
+        });
+      }
+      return; // done — skip admin approval
+    } catch (err) {
+      logger.error({ err, msgId }, 'Audio auto-reply failed — falling back to admin approval');
+      // fall through to normal approval flow below
+    }
   }
 
   // ── 10. Send TTS audio to admin group with approval prompt ────────────────
@@ -217,7 +293,7 @@ export async function handleAudioMessage(
     `*Q:* "${transcription}"\n\n` +
     `Reply *thik hai* to send, *nahi* to reject, or record your own voice answer.`;
 
-  const sentMsg = await sock.sendMessage(env.ADMIN_GROUP_JID, {
+  const sentMsg = await sock.sendMessage(adminJid, {
     audio: ttsBuffer,
     mimetype: 'audio/ogg; codecs=opus',
     ptt: false,

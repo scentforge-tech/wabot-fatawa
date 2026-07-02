@@ -18,6 +18,7 @@ import { handleTextMessage } from './handlers/text.handler';
 import { handleApprovalMessage } from './handlers/approval.handler';
 import { downloadAuthFromFirestore, uploadFileToFirestore } from './auth-firestore';
 import { loadGroupSettings, getGroupSettings } from '../services/settings.service';
+import { warmKnowledgeBaseCache } from '../services/fatawa-kb.service';
 import type { ServerResponse } from 'http';
 
 // ─── Dashboard SSE clients ────────────────────────────────────────────────────
@@ -171,6 +172,10 @@ export async function startBot(): Promise<void> {
   // Load group settings from Firestore (replaces env var hardcoding)
   await loadGroupSettings();
 
+  // Start loading the fatawa KB into memory now (non-blocking) so the first
+  // pilgrim question after startup doesn't pay the ~20-30s Firestore load cost.
+  warmKnowledgeBaseCache();
+
   const hasLocalAuth = fs.existsSync(env.AUTH_DIR) &&
     fs.readdirSync(env.AUTH_DIR).length > 0;
   if (!hasLocalAuth) {
@@ -314,6 +319,8 @@ export async function startBot(): Promise<void> {
       const settings = getGroupSettings();
       const isPublicGroup = remoteJid === settings.publicGroupJid;
       const isAdminGroup  = remoteJid === settings.adminGroupJid;
+      // 1-on-1 chat (DM) with the bot — only handled when answerDMs is enabled
+      const isDM = !isGroup && remoteJid.endsWith('@s.whatsapp.net');
 
       // Emit to dashboard SSE clients
       const textContent = msg.message?.conversation
@@ -340,15 +347,16 @@ export async function startBot(): Promise<void> {
 
       const isText = msgType === 'conversation' || msgType === 'extendedTextMessage';
 
-      logger.info({ isPublicGroup, isAdminGroup, isAudio, isText, msgType, remoteJid }, '🔎 Routing decision');
+      const isDMQuestion = isDM && settings.answerDMs;
+      logger.info({ isPublicGroup, isAdminGroup, isDM: isDMQuestion, isAudio, isText, msgType, remoteJid }, '🔎 Routing decision');
 
-      if (isPublicGroup && isAudio) {
-        logger.info({ msgId: msg.key.id }, '🎤 → Audio handler');
+      if ((isPublicGroup || isDMQuestion) && isAudio) {
+        logger.info({ msgId: msg.key.id, isDM: isDMQuestion }, '🎤 → Audio handler');
         await handleAudioMessage(sock!, msg).catch((err) =>
           logger.error({ err, msgId: msg.key.id }, 'Audio handler error'),
         );
-      } else if (isPublicGroup && isText) {
-        logger.info({ msgId: msg.key.id }, '💬 → Text handler');
+      } else if ((isPublicGroup || isDMQuestion) && isText) {
+        logger.info({ msgId: msg.key.id, isDM: isDMQuestion }, '💬 → Text handler');
         await handleTextMessage(sock!, msg).catch((err) =>
           logger.error({ err, msgId: msg.key.id }, 'Text handler error'),
         );

@@ -180,6 +180,59 @@ ${DASH_CSS}
           <div id="grp-alert" style="margin-top:4px"></div>
           <div class="group-grid" id="grp-grid"></div>
         </div>
+        <div class="card" style="margin-bottom:14px">
+          <div class="card-title">🤖 Reply Behavior</div>
+          <div style="font-size:.78rem;color:var(--muted);margin-bottom:12px">
+            Choose how the bot answers pilgrim questions.
+          </div>
+          <div class="rmode-grid" id="rmode-grid">
+            <label class="rmode" id="rm-approval">
+              <input type="radio" name="replyMode" value="approval" onchange="onReplyModeChange()">
+              <div class="rmode-b">
+                <strong>🧑‍⚖️ Approval</strong>
+                <span>Sheikh approves every answer in the admin group. Safest.</span>
+              </div>
+            </label>
+            <label class="rmode" id="rm-auto">
+              <input type="radio" name="replyMode" value="auto" onchange="onReplyModeChange()">
+              <div class="rmode-b">
+                <strong>🤖 Auto</strong>
+                <span>Bot answers high-confidence questions directly. Asks the Sheikh only when unsure.</span>
+              </div>
+            </label>
+            <label class="rmode" id="rm-hybrid">
+              <input type="radio" name="replyMode" value="hybrid" onchange="onReplyModeChange()">
+              <div class="rmode-b">
+                <strong>🤝 Hybrid</strong>
+                <span>Bot auto-answers, but copies every auto-reply to the Sheikh for oversight.</span>
+              </div>
+            </label>
+          </div>
+
+          <div id="auto-opts" style="margin-top:14px;display:none">
+            <div class="field">
+              <label>Auto-reply confidence threshold — <strong id="thr-val" style="color:var(--green)">72%</strong></label>
+              <input type="range" id="autoThreshold" min="50" max="95" step="1" value="72"
+                     oninput="document.getElementById('thr-val').textContent=this.value+'%'"
+                     style="width:100%">
+              <div style="font-size:.72rem;color:var(--muted);margin-top:4px">
+                Questions matching the knowledge base at or above this score are answered automatically.
+                Lower = more auto-replies, higher = more caution.
+              </div>
+            </div>
+          </div>
+
+          <label class="dm-toggle" style="display:flex;align-items:center;gap:10px;margin-top:14px;cursor:pointer">
+            <input type="checkbox" id="answerDMs">
+            <div>
+              <strong style="font-size:.86rem">💬 Answer direct messages (1-on-1 chats)</strong>
+              <div style="font-size:.72rem;color:var(--muted)">
+                Also respond to questions sent to the bot privately, not just in the public group.
+              </div>
+            </div>
+          </label>
+        </div>
+
         <div style="display:flex;gap:10px;align-items:center">
           <button class="btn btn-green" onclick="saveSettings()">💾 Save Settings</button>
           <div id="save-alert" style="flex:1"></div>
@@ -370,6 +423,10 @@ ${DASH_CSS}
         <textarea id="m-kp" class="inp-ta" rows="3" placeholder="• Point 1&#10;• Point 2"></textarea>
       </div>
       <div class="field">
+        <label>📖 Authentic References (Quran / Hadith — read-only, topic-level)</label>
+        <div id="m-refs" style="font-size:.78rem;color:var(--muted)">—</div>
+      </div>
+      <div class="field">
         <label>📝 Answer Text (text reply)</label>
         <textarea id="m-ans" class="inp-ta" rows="3" placeholder="Full answer for text-only reply…"></textarea>
       </div>
@@ -381,6 +438,11 @@ ${DASH_CSS}
         <div class="field">
           <label>🎵 Audio File (GCS filename)</label>
           <input type="text" id="m-audio" class="inp" placeholder="PTT-20250101-WA0001.opus">
+          <div style="display:flex;gap:8px;margin-top:6px;align-items:center">
+            <input type="file" id="m-audio-file" accept="audio/*" style="font-size:.72rem;flex:1">
+            <button type="button" class="btn btn-ghost btn-xs" id="m-audio-upload-btn" onclick="mUploadAudio()">⬆️ Upload</button>
+          </div>
+          <div id="m-audio-upload-st" style="font-size:.72rem;margin-top:4px"></div>
         </div>
         <div class="field">
           <label>Confidence Score (0–1)</label>

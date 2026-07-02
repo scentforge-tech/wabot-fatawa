@@ -12,6 +12,22 @@
           }
         }
       ]
+    },
+    {
+      "collectionGroup": "_fatawa_pending",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "_fatawa_pending",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "adminMsgId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

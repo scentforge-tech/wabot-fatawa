@@ -8,9 +8,11 @@ import {
   getMostRecentPending,
   updatePendingStatus,
   downloadAudioFile,
+  selfTrainFromAnswer,
   PendingQuestion,
 } from '../../services/fatawa-kb.service';
 import { getGroupSettings } from '../../services/settings.service';
+import { transcribeAudio } from '../../services/whisper.service';
 import { env } from '../../config/env';
 import logger from '../../config/logger';
 
@@ -268,6 +270,14 @@ async function sendTextAnswerToPublic(
     });
 
     logger.info({ publicGroupJid, answerText: answerText.slice(0, 50) }, '📤 Text answer sent to public group');
+
+    // Self-train: the Sheikh typed a brand-new answer — only worth folding back
+    // into the KB when there wasn't already a good suggested match (otherwise
+    // this is just a rephrase of an existing record, not new knowledge).
+    if (pending && !pending.suggestedAudioFileName && pending.questionText) {
+      selfTrainFromAnswer({ questionText: pending.questionText, answerText })
+        .catch((err) => logger.warn({ err }, 'Self-train from text answer failed (non-fatal)'));
+    }
   } catch (err) {
     logger.error({ err }, 'Failed to send text answer to public group');
     await safeSend(sock, adminJid, { text: `❌ Failed to send answer: ${String(err)}` });
@@ -311,6 +321,25 @@ async function forwardVoiceToPublic(
         ? `✅ *Voice answer forwarded to public group.*\n\n*Q:* "${pending.questionText}"`
         : `✅ *Voice forwarded to public group.*`,
     });
+
+    // Self-train: a fresh Sheikh recording is only new knowledge when there
+    // wasn't already a suggested KB match for this question.
+    if (pending && !pending.suggestedAudioFileName && pending.questionText) {
+      (async () => {
+        let answerTranscript = '';
+        try {
+          const result = await transcribeAudio(audioBuffer, 'answer.ogg', 'auto');
+          answerTranscript = result.text;
+        } catch (err) {
+          logger.warn({ err }, 'Could not transcribe Sheikh voice answer for self-training (continuing without transcript)');
+        }
+        await selfTrainFromAnswer({
+          questionText: pending.questionText,
+          answerAudioBuffer: audioBuffer,
+          answerTranscript,
+        });
+      })().catch((err) => logger.warn({ err }, 'Self-train from voice answer failed (non-fatal)'));
+    }
   } catch (err) {
     logger.error({ err }, 'Failed to forward admin voice');
     await safeSend(sock, adminJid, { text: `❌ Forward failed: ${String(err)}` });

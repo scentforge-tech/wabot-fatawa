@@ -49,7 +49,7 @@ function mkChart(id,labels,data,type){
   var opts={responsive:true,maintainAspectRatio:false,plugins:{legend:{display:type!=='bar',position:'bottom',labels:{color:'#64748b',boxWidth:10,font:{size:10},padding:8}}}};
   if(type==='bar'){
     S.charts[id]=new Chart(ctx,{type:'bar',data:{labels:labels,datasets:[{data:data,backgroundColor:CC.slice(0,data.length),borderRadius:4}]},
-      options:Object.assign({},opts,{scales:{x:{ticks:{color:'#64748b',font:{size:9}},grid:{color:'rgba(255,255,255,0.04)'}},y:{ticks:{color:'#64748b'},grid:{color:'rgba(255,255,255,0.04)'}}}}})});
+      options:Object.assign({},opts,{scales:{x:{ticks:{color:'#64748b',font:{size:9}},grid:{color:'rgba(255,255,255,0.04)'}},y:{ticks:{color:'#64748b'},grid:{color:'rgba(255,255,255,0.04)'}}}})});
   }else{
     S.charts[id]=new Chart(ctx,{type:type,data:{labels:labels,datasets:[{data:data,backgroundColor:CC.slice(0,data.length),borderWidth:0}]},options:opts});
   }
@@ -83,8 +83,32 @@ async function loadDebug(){
     if(dbg)dbg.innerHTML='<span style="color:var(--'+(on?'green':'red')+')">'+
       (on?'🟢 Connected':'🔴 Offline')+'</span> | KB: <strong>'+d.kbCount+'</strong>'+
       (S.pJid?' | 📢 '+S.pJid.split('@')[0]:' | ⚠️ No public')+
-      (S.aJid?' | 🔐 '+S.aJid.split('@')[0]:' | ⚠️ No admin');
+      (S.aJid?' | 🔐 '+S.aJid.split('@')[0]:' | ⚠️ No admin')+
+      ' | 🤖 '+((d.settings&&d.settings.replyMode)||'approval');
+    if(!S.replyTouched)applyReplySettings(d.settings||{});
   }catch(e){var dbg2=document.getElementById('dbg');if(dbg2)dbg2.textContent='Error: '+e.message;}
+}
+function applyReplySettings(s){
+  var mode=s.replyMode||'approval';
+  var rb=document.querySelector('input[name="replyMode"][value="'+mode+'"]');
+  if(rb)rb.checked=true;
+  document.querySelectorAll('.rmode').forEach(function(l){
+    var inp=l.querySelector('input');l.classList.toggle('on',inp&&inp.checked);
+  });
+  var thr=Math.round((typeof s.autoReplyThreshold==='number'?s.autoReplyThreshold:0.72)*100);
+  var ti=document.getElementById('autoThreshold');if(ti)ti.value=thr;
+  var tv=document.getElementById('thr-val');if(tv)tv.textContent=thr+'%';
+  var dm=document.getElementById('answerDMs');if(dm)dm.checked=!!s.answerDMs;
+  var ao=document.getElementById('auto-opts');if(ao)ao.style.display=(mode==='approval')?'none':'block';
+}
+function onReplyModeChange(){
+  S.replyTouched=true;
+  var sel=document.querySelector('input[name="replyMode"]:checked');
+  var mode=sel?sel.value:'approval';
+  document.querySelectorAll('.rmode').forEach(function(l){
+    var inp=l.querySelector('input');l.classList.toggle('on',inp&&inp.checked);
+  });
+  var ao=document.getElementById('auto-opts');if(ao)ao.style.display=(mode==='approval')?'none':'block';
 }
 var grpSt={};
 async function loadGroups(){
@@ -109,7 +133,7 @@ function renderGrps(){
     var st=grpSt[g.id]||'none';
     var cls=st==='pub'?'sp':st==='adm'?'sa':'';
     var b=st==='pub'?'<div class="gbadge gbadge-pub">PUBLIC</div>':st==='adm'?'<div class="gbadge gbadge-adm">ADMIN</div>':'';
-    return '<div class="gc '+cls+'" onclick="cycleGrp(\''+g.id+'\')">'+b+'<div class="gname">'+esc(g.name)+'</div><div class="gjid">'+g.id+'</div></div>';
+    return '<div class="gc '+cls+'" onclick="cycleGrp(\\''+g.id+'\\')">'+b+'<div class="gname">'+esc(g.name)+'</div><div class="gjid">'+g.id+'</div></div>';
   }).join('');
 }
 function cycleGrp(id){
@@ -129,10 +153,16 @@ function cycleGrp(id){
 async function saveSettings(){
   var al=document.getElementById('save-alert');
   if(!S.pJid||!S.aJid){al.innerHTML='<div class="toast toast-err">Please select both Public and Admin groups</div>';return;}
+  var modeSel=document.querySelector('input[name="replyMode"]:checked');
+  var replyMode=modeSel?modeSel.value:'approval';
+  var thrEl=document.getElementById('autoThreshold');
+  var autoReplyThreshold=(thrEl?parseInt(thrEl.value,10):72)/100;
+  var dmEl=document.getElementById('answerDMs');
+  var answerDMs=dmEl?dmEl.checked:false;
   try{
-    var r=await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({publicGroupJid:S.pJid,adminGroupJid:S.aJid})});
+    var r=await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({publicGroupJid:S.pJid,adminGroupJid:S.aJid,replyMode:replyMode,autoReplyThreshold:autoReplyThreshold,answerDMs:answerDMs})});
     var d=await r.json();
-    if(d.ok){al.innerHTML='<div class="toast toast-ok">✅ Settings saved!</div>';}
+    if(d.ok){al.innerHTML='<div class="toast toast-ok">✅ Settings saved!</div>';S.replyTouched=false;}
     else throw new Error(d.error);
     setTimeout(loadDebug,500);
   }catch(e){al.innerHTML='<div class="toast toast-err">❌ '+esc(e.message)+'</div>';}
@@ -219,7 +249,7 @@ function renderPend(){
     var cp=Math.round(c*100)+'%';
     var cc=c>=0.8?'var(--green)':c>=0.6?'var(--amber)':'var(--red)';
     var isSel=S.selPend&&S.selPend.questionId===p.questionId?'sel':'';
-    return '<div class="pcard '+isSel+'" onclick="selPend(\''+esc(p.questionId)+'\')">'+
+    return '<div class="pcard '+isSel+'" onclick="selPend(\\''+esc(p.questionId)+'\\')">'+
       '<div class="pcard-q">'+esc(p.questionText||'No text')+'</div>'+
       '<div class="cbar"><div class="cbar-fill" style="width:'+cp+';background:'+cc+'"></div></div>'+
       '<div class="pcard-meta">👤 '+esc(p.senderName||'?')+' • '+new Date(p.timestamp||Date.now()).toLocaleTimeString()+'</div></div>';
@@ -293,7 +323,7 @@ function renderKbSide(tc){
   if(!kl)return;
   kl.innerHTML=Object.entries(tc).sort(function(a,b){return b[1]-a[1];}).map(function(e){
     var t=e[0];var c=e[1];
-    return '<button class="kbt'+(KB.topic===t?' active':'')+'" id="kbt-'+t+'" onclick="kbTopic(\''+t+'\')">'+
+    return '<button class="kbt'+(KB.topic===t?' active':'')+'" id="kbt-'+t+'" onclick="kbTopic(\\''+t+'\\')">'+
       (TE[t]||'📂')+' '+t+'<span class="kbt-cnt">'+c+'</span></button>';
   }).join('');
 }
@@ -314,7 +344,7 @@ function renderKbTable(){
     var cls=c>=0.85?'cp-h':c>=0.65?'cp-m':'cp-l';
     var aud=rec.audioFileName?'<span class="achip">🎵 '+esc(rec.audioFileName.slice(0,14))+'</span>':'<span style="color:var(--muted);font-size:.68rem">text</span>';
     var rul=rec.authenticRuling?esc(rec.authenticRuling.slice(0,50))+'…':'<span style="color:var(--muted)">—</span>';
-    return '<tr onclick="mOpen(\''+esc(rec.id)+'\')">'+
+    return '<tr onclick="mOpen(\\''+esc(rec.id)+'\\')">'+
       '<td style="color:var(--muted);font-size:.7rem">'+(off+i+1)+'</td>'+
       '<td title="'+esc(rec.question||'')+'">'+esc((rec.question||'').slice(0,65))+'</td>'+
       '<td><span style="font-size:.7rem;font-weight:700;color:var(--teal)">'+esc(rec.topic||'?')+'</span></td>'+
@@ -322,7 +352,7 @@ function renderKbTable(){
       '<td><span class="cpill '+cls+'">'+Math.round(c*100)+'%</span></td>'+
       '<td title="'+esc(rec.authenticRuling||'')+'">'+rul+'</td>'+
       '<td>'+aud+'</td>'+
-      '<td><button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();mOpen(\''+esc(rec.id)+'\')">✏️</button></td></tr>';
+      '<td><button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();mOpen(\\''+esc(rec.id)+'\\')">✏️</button></td></tr>';
   }).join('');
 }
 function kbTopic(t){
@@ -353,6 +383,9 @@ function openAdd(){
   ['m-q','m-ruling','m-kp','m-ans','m-tr','m-audio','m-en','m-kw'].forEach(function(id){
     var e=document.getElementById(id);if(e)e.value='';
   });
+  renderRefs(null);
+  var af=document.getElementById('m-audio-file');if(af)af.value='';
+  var aus=document.getElementById('m-audio-upload-st');if(aus)aus.textContent='';
   var mc=document.getElementById('m-conf');if(mc)mc.value='0.80';
   var ml=document.getElementById('m-label');if(ml)ml.value='Dashboard Added';
   var mtp=document.getElementById('m-topic');if(mtp)mtp.value='GENERAL';
@@ -396,8 +429,49 @@ async function mOpen(id){
     var md=document.getElementById('m-del');if(md)md.style.display='';
     var me=document.getElementById('m-emb');if(me)me.style.display='';
     var ms=document.getElementById('m-save');if(ms)ms.textContent='💾 Save Changes';
+    renderRefs(rec.authenticReferences);
+    var af=document.getElementById('m-audio-file');if(af)af.value='';
+    var aus=document.getElementById('m-audio-upload-st');if(aus)aus.textContent='';
     if(mst)mst.textContent='';
   }catch(e){if(mst)mst.textContent='❌ '+e.message;}
+}
+function renderRefs(refs){
+  var box=document.getElementById('m-refs');if(!box)return;
+  if(!refs||!refs.length){box.innerHTML='<span style="color:var(--muted)">No verified references yet for this topic.</span>';return;}
+  box.innerHTML=refs.map(function(r){
+    var icon=r.type==='quran'?'📗':'📘';
+    var grading=r.grading?' <span style="color:var(--muted)">('+esc(r.grading)+')</span>':'';
+    return '<div style="border:1px solid var(--border2);border-radius:8px;padding:8px 10px;margin-bottom:6px">'+
+      '<div style="font-weight:700">'+icon+' '+esc(r.citation)+grading+'</div>'+
+      '<div dir="rtl" style="margin:4px 0;font-family:inherit">'+esc(r.arabic||'')+'</div>'+
+      '<div>EN: '+esc(r.english||'')+'</div>'+
+      '<div>اردو: '+esc(r.urdu||'')+'</div>'+
+      '<div>Roman Urdu: '+esc(r.romanUrdu||'')+'</div>'+
+      (r.sourceUrl?'<div style="font-size:.7rem;margin-top:3px"><a href="'+esc(r.sourceUrl)+'" target="_blank" rel="noopener" style="color:var(--teal)">source ↗</a></div>':'')+
+      '</div>';
+  }).join('');
+}
+async function mUploadAudio(){
+  var st=document.getElementById('m-audio-upload-st');
+  var id=document.getElementById('m-id').value;
+  if(!id){if(st)st.innerHTML='<span style="color:var(--red)">❌ Save the record first, then upload audio</span>';return;}
+  var fi=document.getElementById('m-audio-file');
+  var file=fi&&fi.files&&fi.files[0];
+  if(!file){if(st)st.innerHTML='<span style="color:var(--red)">❌ Choose an audio file first</span>';return;}
+  if(st)st.innerHTML='<span style="color:var(--teal)">⏳ Uploading…</span>';
+  try{
+    var b64=await new Promise(function(resolve,reject){
+      var r=new FileReader();
+      r.onload=function(){resolve(r.result.split(',')[1]);};
+      r.onerror=reject;
+      r.readAsDataURL(file);
+    });
+    var res=await fetch('/api/kb/'+id+'/upload-audio',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:file.name,dataBase64:b64})});
+    var d=await res.json();
+    if(!d.ok)throw new Error(d.error||'Upload failed');
+    document.getElementById('m-audio').value=d.audioFileName;
+    if(st)st.innerHTML='<span style="color:var(--green)">✅ Uploaded: '+esc(d.audioFileName)+'</span>';
+  }catch(e){if(st)st.innerHTML='<span style="color:var(--red)">❌ '+esc(e.message)+'</span>';}
 }
 async function mSave(){
   var id=document.getElementById('m-id').value;

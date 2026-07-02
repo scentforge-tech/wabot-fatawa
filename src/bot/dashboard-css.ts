@@ -225,4 +225,14 @@ input,textarea,select{font-family:var(--font);}
 .sdot{width:5px;height:5px;border-radius:50%;}
 .sdot.ok{background:var(--green);}
 .sdot.off{background:var(--red);}
+/* ── Reply behavior ── */
+.rmode-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+@media(max-width:820px){.rmode-grid{grid-template-columns:1fr;}}
+.rmode{position:relative;display:block;cursor:pointer;}
+.rmode input{position:absolute;opacity:0;pointer-events:none;}
+.rmode-b{border:1px solid var(--border2);border-radius:var(--r-sm);padding:12px 14px;height:100%;transition:var(--trans);background:var(--glass);}
+.rmode-b strong{display:block;font-size:.86rem;margin-bottom:5px;}
+.rmode-b span{display:block;font-size:.73rem;color:var(--muted);line-height:1.4;}
+.rmode:hover .rmode-b{border-color:var(--border2);background:var(--glass2);}
+.rmode.on .rmode-b{border-color:var(--green);background:var(--green-g);box-shadow:0 0 0 1px var(--green-dim);}
 </style>`;

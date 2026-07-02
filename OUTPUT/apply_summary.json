@@ -1,0 +1,98 @@
+[
+  {
+    "topic": "SALAH",
+    "recordsUpdated": 34,
+    "citations": 7,
+    "newRuling": true
+  },
+  {
+    "topic": "IHRAM",
+    "recordsUpdated": 69,
+    "citations": 6,
+    "newRuling": true
+  },
+  {
+    "topic": "JAMARAT",
+    "recordsUpdated": 45,
+    "citations": 5,
+    "newRuling": true
+  },
+  {
+    "topic": "ARAFAT",
+    "recordsUpdated": 12,
+    "citations": 4,
+    "newRuling": true
+  },
+  {
+    "topic": "TAWAF",
+    "recordsUpdated": 128,
+    "citations": 6,
+    "newRuling": true
+  },
+  {
+    "topic": "QURBANI",
+    "recordsUpdated": 32,
+    "citations": 6,
+    "newRuling": true
+  },
+  {
+    "topic": "WUDU",
+    "recordsUpdated": 9,
+    "citations": 6,
+    "newRuling": true
+  },
+  {
+    "topic": "HALQ",
+    "recordsUpdated": 5,
+    "citations": 4,
+    "newRuling": true
+  },
+  {
+    "topic": "MUZDALIFAH",
+    "recordsUpdated": 2,
+    "citations": 6,
+    "newRuling": true
+  },
+  {
+    "topic": "MINA",
+    "recordsUpdated": 25,
+    "citations": 3,
+    "newRuling": true
+  },
+  {
+    "topic": "UMRAH",
+    "recordsUpdated": 20,
+    "citations": 5,
+    "newRuling": true
+  },
+  {
+    "topic": "MADINAH",
+    "recordsUpdated": 11,
+    "citations": 8,
+    "newRuling": true
+  },
+  {
+    "topic": "HAIZ",
+    "recordsUpdated": 7,
+    "citations": 5,
+    "newRuling": true
+  },
+  {
+    "topic": "SAEE",
+    "recordsUpdated": 4,
+    "citations": 4,
+    "newRuling": true
+  },
+  {
+    "topic": "QASR",
+    "recordsUpdated": 2,
+    "citations": 4,
+    "newRuling": true
+  },
+  {
+    "topic": "GENERAL",
+    "recordsUpdated": 225,
+    "citations": 3,
+    "newRuling": false
+  }
+]
